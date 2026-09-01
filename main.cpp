@@ -5,135 +5,111 @@
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include <cstdlib>
+#include <ctime>
+#include <stack>
 
-// Virtual Screen Setup: 80x60 text grid (at 8x8 font = 640x480 native resolution)
+// Display resolution: 100x60 text grid (800x480) -> Scaled 2x to 1600x960 window
 constexpr int CHAR_W = 8;
 constexpr int CHAR_H = 8;
-constexpr int COLS = 80;
+constexpr int VIEW_COLS = 68; // 3D Viewport Width in characters
+constexpr int TOTAL_COLS = 100; // Full screen including minimap sidebar
 constexpr int ROWS = 60;
-constexpr int SCREEN_WIDTH = COLS * CHAR_W;  // 640
-constexpr int SCREEN_HEIGHT = ROWS * CHAR_H; // 480
-constexpr int SCALE = 2;                     // Window: 1280x960
+constexpr int SCREEN_WIDTH = TOTAL_COLS * CHAR_W;  // 800
+constexpr int SCREEN_HEIGHT = ROWS * CHAR_H;       // 480
+constexpr int SCALE = 2;
 
 constexpr double FIXED_TIMESTEP = 1000.0 / 60.0;
 
-// World Map (0 = Empty, 1 = Concrete Wall, 2 = Iron Door, 3 = Goal Bunker Exit)
-constexpr int MAP_W = 24;
-constexpr int MAP_H = 24;
+// World Map (Odd dimensions for perfect grid maze)
+constexpr int MAP_W = 25;
+constexpr int MAP_H = 25;
 
-const int WORLD_MAP[MAP_H][MAP_W] = {
-    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
-    {1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1},
-    {1,0,1,1,0,0,1,0,1,1,1,1,1,0,0,1,0,1,1,1,1,1,0,1},
-    {1,0,1,0,0,0,0,0,1,0,0,0,1,0,0,2,0,0,0,0,0,1,0,1},
-    {1,0,1,0,0,0,0,0,1,0,0,0,1,0,0,1,0,1,1,0,0,1,0,1},
-    {1,0,1,1,1,2,1,1,1,0,0,0,1,1,1,1,0,1,1,0,0,1,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,1,1,1,0,0,1,1,1,1,0,0,1,1,1,1,1,1,1,2,1,1,1,1},
-    {1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,1,0,0,1,0,0,1,0,0,1,0,1,1,1,1,1,0,0,1,0,1},
-    {1,0,0,2,0,0,0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,1,0,1},
-    {1,0,0,1,0,0,1,0,0,1,0,0,1,0,1,0,3,0,1,0,0,1,0,1},
-    {1,0,0,1,1,1,1,0,0,1,1,1,1,0,1,0,0,0,1,0,0,1,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,0,0,1,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1},
-    {1,0,0,0,0,1,0,0,1,0,0,0,0,0,0,1,0,0,1,0,0,0,0,1},
-    {1,0,1,1,0,1,0,0,1,0,1,1,1,0,0,1,0,0,1,0,1,1,0,1},
-    {1,0,0,1,0,2,0,0,2,0,1,0,1,0,0,2,0,0,2,0,1,0,0,1},
-    {1,0,0,1,0,1,0,0,1,0,1,0,1,0,0,1,0,0,1,0,1,0,0,1},
-    {1,0,1,1,0,1,1,1,1,0,1,1,1,0,0,1,1,1,1,0,1,1,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
-};
+// High-contrast CRT green palette
+constexpr uint32_t CRT_LIGHT_BRIGHT = 0xFF4ADE80; // Bright green (E-W walls up close)
+constexpr uint32_t CRT_LIGHT_MID    = 0xFF22C55E; // Standard green (E-W mid)
+constexpr uint32_t CRT_LIGHT_DIM    = 0xFF16A34A; // Dim green (E-W far)
 
-// ASCII Luminance Ramp
-const char ASCII_RAMP[] = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
-const int RAMP_LEN = sizeof(ASCII_RAMP) - 1;
+constexpr uint32_t CRT_DARK_BRIGHT  = 0xFF15803D; // Dark green (N-S walls up close)
+constexpr uint32_t CRT_DARK_MID     = 0xFF166534; // Dark green (N-S mid)
+constexpr uint32_t CRT_DARK_DIM     = 0xFF14532D; // Dark green (N-S far)
 
-// 8x8 Standard Bitmap Font
+constexpr uint32_t RED_GOAL_BRIGHT  = 0xFFF43F5E;
+constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
+
+// Audio Configuration
+constexpr int AUDIO_SAMPLE_RATE = 44100;
+constexpr int AUDIO_BUFFER_SIZE = 1024;
+
+// 8x8 Minimal Bitmap Font
 const uint8_t FONT_8X8[96][8] = {
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // Space
-    {0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00}, // !
-    {0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00}, // "
-    {0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00}, // #
-    {0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00}, // $
-    {0x00,0x66,0xAC,0xD8,0x36,0x6A,0x00,0x00}, // %
-    {0x38,0x6C,0x38,0x76,0xDC,0xCC,0x76,0x00}, // &
-    {0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00}, // '
-    {0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00}, // (
-    {0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00}, // )
-    {0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00}, // *
-    {0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00}, // +
-    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30}, // ,
-    {0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00}, // -
-    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00}, // .
-    {0x06,0x0C,0x18,0x30,0x60,0xC0,0x80,0x00}, // /
-    {0x7C,0xC6,0xCE,0xD6,0xE6,0xC6,0x7C,0x00}, // 0
-    {0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00}, // 1
-    {0x7C,0xC6,0x06,0x1C,0x30,0x66,0xFE,0x00}, // 2
-    {0x7C,0xC6,0x06,0x3C,0x06,0xC6,0x7C,0x00}, // 3
-    {0x1C,0x3C,0x6C,0xCC,0xFE,0x0C,0x1E,0x00}, // 4
-    {0xFE,0xC0,0xFC,0x06,0x06,0xC6,0x7C,0x00}, // 5
-    {0x7C,0xC6,0xC0,0xFC,0xC6,0xC6,0x7C,0x00}, // 6
-    {0xFE,0x06,0x0C,0x18,0x30,0x30,0x30,0x00}, // 7
-    {0x7C,0xC6,0xC6,0x7C,0xC6,0xC6,0x7C,0x00}, // 8
-    {0x7C,0xC6,0xC6,0x7E,0x06,0x0C,0x78,0x00}, // 9
-    {0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00}, // :
-    {0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30}, // ;
-    {0x06,0x0C,0x18,0x30,0x18,0x0C,0x06,0x00}, // <
-    {0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00}, // =
-    {0x60,0x30,0x18,0x0C,0x18,0x30,0x60,0x00}, // >
-    {0x7C,0xC6,0x0C,0x18,0x18,0x00,0x18,0x00}, // ?
-    {0x7C,0xC6,0xDE,0xDE,0xDE,0xC0,0x78,0x00}, // @
-    {0x38,0x6C,0xC6,0xFE,0xC6,0xC6,0xC6,0x00}, // A
-    {0xFC,0x66,0x66,0x7C,0x66,0x66,0xFC,0x00}, // B
-    {0x3C,0x66,0xC0,0xC0,0xC0,0x66,0x3C,0x00}, // C
-    {0xF8,0x6C,0x66,0x66,0x66,0x6C,0xF8,0x00}, // D
-    {0xFE,0x62,0x68,0x78,0x68,0x62,0xFE,0x00}, // E
-    {0xFE,0x62,0x68,0x78,0x68,0x60,0xF0,0x00}, // F
-    {0x3C,0x66,0xC0,0xC0,0xCE,0x66,0x3E,0x00}, // G
-    {0xC6,0xC6,0xC6,0xFE,0xC6,0xC6,0xC6,0x00}, // H
-    {0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00}, // I
-    {0x1E,0x0C,0x0C,0x0C,0xCC,0xCC,0x78,0x00}, // J
-    {0xE6,0x66,0x6C,0x78,0x6C,0x66,0xE6,0x00}, // K
-    {0xF0,0x60,0x60,0x60,0x62,0x66,0xFE,0x00}, // L
-    {0xC6,0xEE,0xFE,0xFE,0xD6,0xC6,0xC6,0x00}, // M
-    {0xC6,0xE6,0xF6,0xDE,0xCE,0xC6,0xC6,0x00}, // N
-    {0x7C,0xC6,0xC6,0xC6,0xC6,0xC6,0x7C,0x00}, // O
-    {0xFC,0x66,0x66,0x7C,0x60,0x60,0xF0,0x00}, // P
-    {0x7C,0xC6,0xC6,0xC6,0xC6,0xCE,0x7C,0x06}, // Q
-    {0xFC,0x66,0x66,0x7C,0x6C,0x66,0xE6,0x00}, // R
-    {0x7C,0xC6,0x60,0x38,0x0C,0xC6,0x7C,0x00}, // S
-    {0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00}, // T
-    {0xC6,0xC6,0xC6,0xC6,0xC6,0xC6,0x7C,0x00}, // U
-    {0xC6,0xC6,0xC6,0xC6,0xC6,0x6C,0x38,0x00}, // V
-    {0xC6,0xC6,0xC6,0xD6,0xFE,0xEE,0xC6,0x00}, // W
-    {0xC6,0xC6,0x6C,0x38,0x6C,0xC6,0xC6,0x00}, // X
-    {0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00}, // Y
-    {0xFE,0xC6,0x8C,0x18,0x32,0x66,0xFE,0x00}  // Z
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, {0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00},
+    {0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00}, {0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00},
+    {0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00}, {0x00,0x66,0xAC,0xD8,0x36,0x6A,0x00,0x00},
+    {0x38,0x6C,0x38,0x76,0xDC,0xCC,0x76,0x00}, {0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00},
+    {0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00}, {0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00},
+    {0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00}, {0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00},
+    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30}, {0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00},
+    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00}, {0x06,0x0C,0x18,0x30,0x60,0xC0,0x80,0x00},
+    {0x7C,0xC6,0xCE,0xD6,0xE6,0xC6,0x7C,0x00}, {0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00},
+    {0x7C,0xC6,0x06,0x1C,0x30,0x66,0xFE,0x00}, {0x7C,0xC6,0x06,0x3C,0x06,0xC6,0x7C,0x00},
+    {0x1C,0x3C,0x6C,0xCC,0xFE,0x0C,0x1E,0x00}, {0xFE,0xC0,0xFC,0x06,0x06,0xC6,0x7C,0x00},
+    {0x7C,0xC6,0xC0,0xFC,0xC6,0xC6,0x7C,0x00}, {0xFE,0x06,0x0C,0x18,0x30,0x30,0x30,0x00},
+    {0x7C,0xC6,0xC6,0x7C,0xC6,0xC6,0x7C,0x00}, {0x7C,0xC6,0xC6,0x7E,0x06,0x0C,0x78,0x00},
+    {0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00}, {0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30},
+    {0x06,0x0C,0x18,0x30,0x18,0x0C,0x06,0x00}, {0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00},
+    {0x60,0x30,0x18,0x0C,0x18,0x30,0x60,0x00}, {0x7C,0xC6,0x0C,0x18,0x18,0x00,0x18,0x00},
+    {0x7C,0xC6,0xDE,0xDE,0xDE,0xC0,0x78,0x00}, {0x38,0x6C,0xC6,0xFE,0xC6,0xC6,0xC6,0x00},
+    {0xFC,0x66,0x66,0x7C,0x66,0x66,0xFC,0x00}, {0x3C,0x66,0xC0,0xC0,0xC0,0x66,0x3C,0x00},
+    {0xF8,0x6C,0x66,0x66,0x66,0x6C,0xF8,0x00}, {0xFE,0x62,0x68,0x78,0x68,0x62,0xFE,0x00},
+    {0xFE,0x62,0x68,0x78,0x68,0x60,0xF0,0x00}, {0x3C,0x66,0xC0,0xC0,0xCE,0x66,0x3E,0x00},
+    {0xC6,0xC6,0xC6,0xFE,0xC6,0xC6,0xC6,0x00}, {0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00},
+    {0x1E,0x0C,0x0C,0x0C,0xCC,0xCC,0x78,0x00}, {0xE6,0x66,0x6C,0x78,0x6C,0x66,0xE6,0x00},
+    {0xF0,0x60,0x60,0x60,0x62,0x66,0xFE,0x00}, {0xC6,0xEE,0xFE,0xFE,0xD6,0xC6,0xC6,0x00},
+    {0xC6,0xE6,0xF6,0xDE,0xCE,0xC6,0xC6,0x00}, {0x7C,0xC6,0xC6,0xC6,0xC6,0xC6,0x7C,0x00},
+    {0xFC,0x66,0x66,0x7C,0x60,0x60,0xF0,0x00}, {0x7C,0xC6,0xC6,0xC6,0xC6,0xCE,0x7C,0x06},
+    {0xFC,0x66,0x66,0x7C,0x6C,0x66,0xE6,0x00}, {0x7C,0xC6,0x60,0x38,0x0C,0xC6,0x7C,0x00},
+    {0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00}, {0xC6,0xC6,0xC6,0xC6,0xC6,0xC6,0x7C,0x00},
+    {0xC6,0xC6,0xC6,0xC6,0xC6,0x6C,0x38,0x00}, {0xC6,0xC6,0xC6,0xD6,0xFE,0xEE,0xC6,0x00},
+    {0xC6,0xC6,0x6C,0x38,0x6C,0xC6,0xC6,0x00}, {0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00},
+    {0xFE,0xC6,0x8C,0x18,0x32,0x66,0xFE,0x00}, {0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00},
+    {0xC0,0x60,0x30,0x18,0x0C,0x06,0x02,0x00}, {0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00}
 };
 
-struct Monster {
-    float x = 12.5f;
-    float y = 12.5f;
-    float speed = 1.6f;
-    bool isChasing = false;
+struct Point { int x, y; };
+
+struct AudioState {
+    float ambientPhase = 0.0f;
+    float heartbeatPhase = 0.0f;
 };
 
-class AsciiHorrorEngine {
+void audioCallback(void* userdata, Uint8* stream, int len) {
+    AudioState* audio = static_cast<AudioState*>(userdata);
+    int16_t* buffer = reinterpret_cast<int16_t*>(stream);
+    int samples = len / sizeof(int16_t);
+
+    for (int i = 0; i < samples; ++i) {
+        audio->ambientPhase += (45.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
+        float ambient = std::sin(audio->ambientPhase) * 0.08f;
+
+        buffer[i] = static_cast<int16_t>(std::clamp(ambient, -1.0f, 1.0f) * 32767.0f);
+    }
+}
+
+class WalkAsciiEngine {
 private:
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     SDL_Texture* screenTexture = nullptr;
+    SDL_AudioDeviceID audioDevice = 0;
     std::vector<uint32_t> pixelBuffer;
     bool isRunning = false;
 
-    // Depth buffer for 3D sprite occlusion
-    float zBuffer[COLS];
-
+    AudioState audioState;
     int worldMap[MAP_H][MAP_W];
+    Point startPos;
+    Point endPos;
 
     struct Player {
         float posX = 1.5f;
@@ -141,18 +117,66 @@ private:
         float dirX = 1.0f;
         float dirY = 0.0f;
         float planeX = 0.0f;
-        float planeY = 0.66f;
-        float moveSpeed = 2.8f;
-        float rotSpeed = 2.4f;
+        float planeY = 0.66f; // ~66 deg FOV
+        float moveSpeed = 3.2f;
+        float rotSpeed = 2.6f;
 
         int forward = 0;
         int rotate = 0;
-        int keysHeld = 1;
-        float sanity = 100.0f;
-        bool hasEscaped = false;
+        int stepsTaken = 0;
+        float prevStepDist = 0.0f;
+        bool completed = false;
     } player;
 
-    Monster stalker;
+    void generateMaze() {
+        for (int r = 0; r < MAP_H; ++r) {
+            for (int c = 0; c < MAP_W; ++c) {
+                worldMap[r][c] = 1;
+            }
+        }
+
+        std::stack<Point> stack;
+        startPos = { 1, 1 };
+        worldMap[startPos.y][startPos.x] = 0;
+        stack.push(startPos);
+
+        const int dx[4] = { 0, 0, 2, -2 };
+        const int dy[4] = { -2, 2, 0, 0 };
+
+        while (!stack.empty()) {
+            Point curr = stack.top();
+            std::vector<int> dirs;
+
+            for (int i = 0; i < 4; ++i) {
+                int nx = curr.x + dx[i];
+                int ny = curr.y + dy[i];
+                if (nx > 0 && nx < MAP_W - 1 && ny > 0 && ny < MAP_H - 1) {
+                    if (worldMap[ny][nx] == 1) dirs.push_back(i);
+                }
+            }
+
+            if (!dirs.empty()) {
+                int d = dirs[rand() % dirs.size()];
+                worldMap[curr.y + dy[d] / 2][curr.x + dx[d] / 2] = 0;
+                worldMap[curr.y + dy[d]][curr.x + dx[d]] = 0;
+                stack.push({ curr.x + dx[d], curr.y + dy[d] });
+            } else {
+                stack.pop();
+            }
+        }
+
+        endPos = { MAP_W - 2, MAP_H - 2 };
+        worldMap[endPos.y][endPos.x] = 2; // Goal Cell (Red Walls)
+
+        player.posX = startPos.x + 0.5f;
+        player.posY = startPos.y + 0.5f;
+        player.dirX = 1.0f;
+        player.dirY = 0.0f;
+        player.planeX = 0.0f;
+        player.planeY = 0.66f;
+        player.stepsTaken = 0;
+        player.completed = false;
+    }
 
     void drawGlyph(int col, int row, char c, uint32_t fgColor) {
         if (c < 32 || c > 127) return;
@@ -171,18 +195,35 @@ private:
 
     void drawText(int col, int row, const std::string& text, uint32_t color) {
         for (size_t i = 0; i < text.size(); ++i) {
-            if (col + i < COLS) {
+            if (col + i < TOTAL_COLS) {
                 drawGlyph(col + i, row, text[i], color);
+            }
+        }
+    }
+
+    void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color) {
+        int x0 = startCol * CHAR_W;
+        int y0 = startRow * CHAR_H;
+        int w = numCols * CHAR_W;
+        int h = numRows * CHAR_H;
+
+        for (int y = y0; y < y0 + h; ++y) {
+            if (y < 0 || y >= SCREEN_HEIGHT) continue;
+            for (int x = x0; x < x0 + w; ++x) {
+                if (x < 0 || x >= SCREEN_WIDTH) continue;
+                pixelBuffer[y * SCREEN_WIDTH + x] = color;
             }
         }
     }
 
 public:
     bool init() {
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) return false;
+        srand(static_cast<unsigned int>(time(nullptr)));
+
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) return false;
 
         window = SDL_CreateWindow(
-            "ASCII 3D HORROR: THE FACILITY",
+            "Walk ASCII 3D Port",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             SCREEN_WIDTH * SCALE, SCREEN_HEIGHT * SCALE,
             SDL_WINDOW_SHOWN
@@ -198,12 +239,19 @@ public:
 
         pixelBuffer.resize(SCREEN_WIDTH * SCREEN_HEIGHT, 0xFF000000);
 
-        for (int r = 0; r < MAP_H; ++r) {
-            for (int c = 0; c < MAP_W; ++c) {
-                worldMap[r][c] = WORLD_MAP[r][c];
-            }
-        }
+        SDL_AudioSpec wantedSpec;
+        SDL_zero(wantedSpec);
+        wantedSpec.freq = AUDIO_SAMPLE_RATE;
+        wantedSpec.format = AUDIO_S16SYS;
+        wantedSpec.channels = 1;
+        wantedSpec.samples = AUDIO_BUFFER_SIZE;
+        wantedSpec.callback = audioCallback;
+        wantedSpec.userdata = &audioState;
 
+        audioDevice = SDL_OpenAudioDevice(nullptr, 0, &wantedSpec, nullptr, 0);
+        if (audioDevice != 0) SDL_PauseAudioDevice(audioDevice, 0);
+
+        generateMaze();
         isRunning = true;
         return true;
     }
@@ -212,22 +260,8 @@ public:
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) isRunning = false;
-
             if (event.type == SDL_KEYDOWN) {
-                // Interact / Unlock Doors ('F' or 'E')
-                if (event.key.keysym.sym == SDLK_f || event.key.keysym.sym == SDLK_e) {
-                    int frontX = int(player.posX + player.dirX * 1.2f);
-                    int frontY = int(player.posY + player.dirY * 1.2f);
-
-                    if (worldMap[frontY][frontX] == 2) { // Iron Door
-                        if (player.keysHeld > 0) {
-                            worldMap[frontY][frontX] = 0; // Unlock & Open
-                            player.keysHeld--;
-                        }
-                    } else if (worldMap[frontY][frontX] == 3) { // Goal Bunker Exit
-                        player.hasEscaped = true;
-                    }
-                }
+                if (event.key.keysym.sym == SDLK_r) generateMaze();
             }
         }
 
@@ -237,16 +271,14 @@ public:
 
         if (state[SDL_SCANCODE_W] || state[SDL_SCANCODE_UP])    player.forward += 1;
         if (state[SDL_SCANCODE_S] || state[SDL_SCANCODE_DOWN])  player.forward -= 1;
-        if (state[SDL_SCANCODE_A] || state[SDL_SCANCODE_LEFT])  player.rotate += 1;
-        if (state[SDL_SCANCODE_D] || state[SDL_SCANCODE_RIGHT]) player.rotate -= 1;
+        if (state[SDL_SCANCODE_A] || state[SDL_SCANCODE_LEFT])  player.rotate -= 1;
+        if (state[SDL_SCANCODE_D] || state[SDL_SCANCODE_RIGHT]) player.rotate += 1;
     }
 
     void update(double dt) {
-        if (player.hasEscaped) return;
-
         float dtSec = static_cast<float>(dt);
 
-        // 1. Player Rotation
+        // Rotation
         if (player.rotate != 0) {
             float rot = player.rotate * player.rotSpeed * dtSec;
             float oldDirX = player.dirX;
@@ -258,48 +290,37 @@ public:
             player.planeY = oldPlaneX * sin(rot) + player.planeY * cos(rot);
         }
 
-        // 2. Player Movement with Collision
+        // Movement with Collision & Step Tracking
         if (player.forward != 0) {
             float step = player.forward * player.moveSpeed * dtSec;
-            float buf = (step > 0) ? 0.3f : -0.3f;
+            float buf = (step > 0) ? 0.35f : -0.35f;
 
-            if (worldMap[int(player.posY)][int(player.posX + player.dirX * (step + buf))] == 0)
+            float prevX = player.posX;
+            float prevY = player.posY;
+
+            if (worldMap[int(player.posY)][int(player.posX + player.dirX * (step + buf))] != 1)
                 player.posX += player.dirX * step;
-            if (worldMap[int(player.posY + player.dirY * (step + buf))][int(player.posX)] == 0)
+            if (worldMap[int(player.posY + player.dirY * (step + buf))][int(player.posX)] != 1)
                 player.posY += player.dirY * step;
+
+            // Step counter accumulation
+            player.prevStepDist += std::hypot(player.posX - prevX, player.posY - prevY);
+            if (player.prevStepDist >= 1.0f) {
+                player.stepsTaken++;
+                player.prevStepDist = 0.0f;
+            }
         }
 
-        // 3. Stalker AI (Horror Stalk & Chase)
-        float distToPlayer = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
-
-        // If player gets close or shines light directly on it, it starts chasing
-        if (distToPlayer < 7.0f) stalker.isChasing = true;
-
-        if (stalker.isChasing) {
-            float dx = (player.posX - stalker.x) / distToPlayer;
-            float dy = (player.posY - stalker.y) / distToPlayer;
-
-            float mx = stalker.x + dx * stalker.speed * dtSec;
-            float my = stalker.y + dy * stalker.speed * dtSec;
-
-            if (worldMap[int(my)][int(mx)] == 0) {
-                stalker.x = mx;
-                stalker.y = my;
-            }
-
-            // Sanity drain when stalker is near
-            player.sanity -= (12.0f / distToPlayer) * dtSec;
-            player.sanity = std::max(0.0f, player.sanity);
+        // Win check
+        if (int(player.posX) == endPos.x && int(player.posY) == endPos.y) {
+            player.completed = true;
         }
     }
 
-    void renderAsciiWorld() {
-        // Clear framebuffer (Pitch Black Void)
-        std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF000000);
-
-        // 1. Raycast 80 text columns
-        for (int col = 0; col < COLS; ++col) {
-            float cameraX = 2.0f * col / float(COLS) - 1.0f;
+    // --- ACCURATE ORIENTATION & DEPTH SHADER ---
+    void render3DView() {
+        for (int col = 0; col < VIEW_COLS; ++col) {
+            float cameraX = 2.0f * col / float(VIEW_COLS) - 1.0f;
             float rayDirX = player.dirX + player.planeX * cameraX;
             float rayDirY = player.dirY + player.planeY * cameraX;
 
@@ -309,7 +330,7 @@ public:
             float deltaDistX = (rayDirX == 0) ? 1e30f : std::abs(1.0f / rayDirX);
             float deltaDistY = (rayDirY == 0) ? 1e30f : std::abs(1.0f / rayDirY);
             float sideDistX, sideDistY, perpWallDist;
-            int stepX, stepY, hit = 0, side = 0;
+            int stepX, stepY, hit = 0, side = 0; // side 0 = East/West, side 1 = North/South
 
             if (rayDirX < 0) { stepX = -1; sideDistX = (player.posX - mapX) * deltaDistX; }
             else             { stepX =  1; sideDistX = (mapX + 1.0f - player.posX) * deltaDistX; }
@@ -328,98 +349,123 @@ public:
             if (side == 0) perpWallDist = (sideDistX - deltaDistX);
             else           perpWallDist = (sideDistY - deltaDistY);
 
-            zBuffer[col] = perpWallDist; // Save distance for monster sprite depth occlusion
-
             int lineHeight = int(ROWS / perpWallDist);
             int drawStart = -lineHeight / 2 + ROWS / 2;
             int drawEnd = lineHeight / 2 + ROWS / 2;
 
-            // Flashlight attenuation model: intense center beam fading with distance
-            float flashlightCone = (1.0f - std::abs(cameraX) * 0.45f);
-            float lightIntensity = (1.0f / (1.0f + perpWallDist * perpWallDist * 0.12f)) * flashlightCone;
+            // 1. Determine Wall Glyph based on Distance Layer
+            char wallGlyph = ' ';
+            if (perpWallDist <= 1.25f)      wallGlyph = '@';
+            else if (perpWallDist <= 2.50f) wallGlyph = '#';
+            else if (perpWallDist <= 4.00f) wallGlyph = '%';
+            else if (perpWallDist <= 5.80f) wallGlyph = '*';
+            else if (perpWallDist <= 7.50f) wallGlyph = '+';
+            else if (perpWallDist <= 9.00f) wallGlyph = '-';
+            else if (perpWallDist <= 11.0f) wallGlyph = '.';
+            else                            wallGlyph = ' '; // Pitch black fog beyond 11 units
 
-            if (side == 1) lightIntensity *= 0.70f; // Shadow one side of walls
+            // 2. Determine Color by Side (Orientation Shading)
+            uint32_t wallColor;
+            if (hit == 2) {
+                // Goal Wall (Red)
+                wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
+            } else {
+                // Normal Maze Wall (Green)
+                if (side == 0) {
+                    // East/West facing (Light shade)
+                    if (perpWallDist < 3.0f)      wallColor = CRT_LIGHT_BRIGHT;
+                    else if (perpWallDist < 6.5f) wallColor = CRT_LIGHT_MID;
+                    else                          wallColor = CRT_LIGHT_DIM;
+                } else {
+                    // North/South facing (Dark shade)
+                    if (perpWallDist < 3.0f)      wallColor = CRT_DARK_BRIGHT;
+                    else if (perpWallDist < 6.5f) wallColor = CRT_DARK_MID;
+                    else                          wallColor = CRT_DARK_DIM;
+                }
+            }
 
+            // Draw Column
             for (int r = 0; r < ROWS; ++r) {
-                if (r >= drawStart && r <= drawEnd) {
-                    // Wall ASCII Glyph
-                    char glyph;
-                    uint32_t color = 0xFFCCCCCC; // Pale green/white phosphor terminal tint
-
-                    if (hit == 2) {
-                        glyph = '#'; // Iron Door
-                        color = 0xFFF59E0B;
-                    } else if (hit == 3) {
-                        glyph = '@'; // Escape Bunker Hatch
-                        color = 0xFF10B981;
-                    } else {
-                        // Pick ASCII character based on flashlight intensity
-                        int rampIndex = int(lightIntensity * (RAMP_LEN - 1));
-                        rampIndex = std::clamp(rampIndex, 0, RAMP_LEN - 1);
-                        glyph = ASCII_RAMP[rampIndex];
-                    }
-
-                    if (lightIntensity > 0.05f) {
-                        drawGlyph(col, r, glyph, color);
-                    }
-                } else if (r > drawEnd) {
-                    // Dark gritty floor dots
-                    float floorDist = ROWS / (2.0f * r - ROWS);
-                    float floorLight = (1.0f / (1.0f + floorDist * floorDist * 0.25f)) * flashlightCone;
-                    if (floorLight > 0.12f && (col % 2 == 0 && r % 2 == 0)) {
-                        drawGlyph(col, r, '.', 0xFF334155);
-                    }
+                if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
+                    drawGlyph(col, r, wallGlyph, wallColor);
                 }
             }
         }
+    }
 
-        // 2. Render Stalker Billboard Sprite
-        float spriteX = stalker.x - player.posX;
-        float spriteY = stalker.y - player.posY;
+    // --- SIDEBAR MINIMAP & UI ---
+    void renderSidebarUI() {
+        // Vertical Divider line between 3D view and sidebar
+        for (int r = 0; r < ROWS; ++r) {
+            drawGlyph(VIEW_COLS, r, '|', 0xFF334155);
+        }
 
-        float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
-        float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
-        float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY); // Depth
+        // Top Header
+        drawText(2, 1, "Walk ASCII 3D", 0xFFFFFFFF);
 
-        if (transformY > 0.3f) {
-            int spriteScreenX = int((COLS / 2) * (1.0f + transformX / transformY));
-            int spriteHeight = std::abs(int(ROWS / transformY));
-            int spriteWidth = spriteHeight; // Square monster frame
+        // Top-Right Minimap Box
+        int miniStartX = 72;
+        int miniStartY = 3;
 
-            int drawStartY = -spriteHeight / 2 + ROWS / 2;
-            int drawEndY = spriteHeight / 2 + ROWS / 2;
-            int drawStartX = -spriteWidth / 2 + spriteScreenX;
-            int drawEndX = spriteWidth / 2 + spriteScreenX;
+        for (int r = 0; r < MAP_H; ++r) {
+            for (int c = 0; c < MAP_W; ++c) {
+                char mapCh = ' ';
+                uint32_t mapCol = 0xFF1E293B;
 
-            for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
-                if (stripe >= 0 && stripe < COLS && transformY < zBuffer[stripe]) {
-                    for (int y = drawStartY; y < drawEndY; ++y) {
-                        if (y >= 0 && y < ROWS) {
-                            // Creepy skull / eye silhouette
-                            char monsterGlyph = (y % 2 == 0) ? '&' : '$';
-                            drawGlyph(stripe, y, monsterGlyph, 0xFFE11D48); // Blood Crimson
-                        }
-                    }
+                if (worldMap[r][c] == 1) {
+                    mapCh = '#';
+                    mapCol = 0xFF475569; // Wall
+                } else if (r == startPos.y && c == startPos.x) {
+                    mapCh = 'S';
+                    mapCol = 0xFF22C55E; // Start
+                } else if (r == endPos.y && c == endPos.x) {
+                    mapCh = 'E';
+                    mapCol = 0xFFEF4444; // End
                 }
+
+                drawGlyph(miniStartX + c, miniStartY + r, mapCh, mapCol);
             }
         }
 
-        // 3. Horror UI & Subtitles
-        drawText(2, 2, "FACILITY SECTOR 04 [BUNKER]", 0xFF64748B);
-        drawText(2, 4, "KEYS: " + std::to_string(player.keysHeld), 0xFFF59E0B);
-        drawText(2, 6, "SANITY: " + std::to_string(int(player.sanity)) + "%", (player.sanity < 30) ? 0xFFEF4444 : 0xFF10B981);
+        // Player Dot on Minimap
+        int pCol = miniStartX + int(player.posX);
+        int pRow = miniStartY + int(player.posY);
+        drawGlyph(pCol, pRow, 'O', 0xFF38BDF8);
 
-        if (stalker.isChasing) {
-            drawText(28, 52, "* DISTANT SHUFFLING FOOTSTEPS *", 0xFFEF4444);
+        // Player Forward View Indicator Ray
+        int pRayCol = miniStartX + int(player.posX + player.dirX * 1.5f);
+        int pRayRow = miniStartY + int(player.posY + player.dirY * 1.5f);
+        if (pRayCol != pCol || pRayRow != pRow) {
+            drawGlyph(pRayCol, pRayRow, '*', 0xFF0284C7);
         }
 
-        if (player.hasEscaped) {
-            drawText(26, 28, "BUNKER AIRLOCK SEALED. YOU ESCAPED.", 0xFF22C55E);
+        // Controls & Progress Telemetry
+        int uiBaseY = 32;
+        drawText(72, uiBaseY,     "[S] Start  [E] End  [O] You", 0xFF94A3B8);
+        drawText(72, uiBaseY + 3, "W A S D / Arrows to move", 0xFFE2E8F0);
+
+        // Step Counter
+        drawText(72, uiBaseY + 7, "Steps: " + std::to_string(player.stepsTaken), 0xFFFFFFFF);
+
+        // Progress bar percentage
+        float totalDist = std::hypot(endPos.x - startPos.x, endPos.y - startPos.y);
+        float currDist = std::hypot(endPos.x - player.posX, endPos.y - player.posY);
+        int progress = std::clamp(int((1.0f - currDist / totalDist) * 100.0f), 0, 100);
+        drawText(72, uiBaseY + 9, "Progress: " + std::to_string(progress) + "%", 0xFF22C55E);
+
+        // Win Banner
+        if (player.completed) {
+            drawRectFilled(12, 22, 44, 8, 0xFF0F172A);
+            drawText(20, 24, "MAZE COMPLETED!", 0xFF4ADE80);
+            drawText(18, 26, "Total Steps: " + std::to_string(player.stepsTaken) + " | Press R", 0xFFFFFFFF);
         }
     }
 
     void render() {
-        renderAsciiWorld();
+        std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF0B0F17); // Dark backdrop
+
+        render3DView();
+        renderSidebarUI();
 
         SDL_UpdateTexture(screenTexture, nullptr, pixelBuffer.data(), SCREEN_WIDTH * sizeof(uint32_t));
         SDL_RenderClear(renderer);
@@ -449,6 +495,7 @@ public:
     }
 
     void cleanup() {
+        if (audioDevice != 0) SDL_CloseAudioDevice(audioDevice);
         if (screenTexture) SDL_DestroyTexture(screenTexture);
         if (renderer) SDL_DestroyRenderer(renderer);
         if (window) SDL_DestroyWindow(window);
@@ -457,8 +504,8 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    AsciiHorrorEngine game;
-    if (game.init()) game.run();
-    game.cleanup();
+    WalkAsciiEngine engine;
+    if (engine.init()) engine.run();
+    engine.cleanup();
     return 0;
 }
