@@ -9,19 +9,17 @@
 #include <ctime>
 #include <stack>
 
-// Display resolution: 100x60 text grid (800x480) -> Scaled 2x to 1600x960 window
+// Virtual Text Grid Resolution (Native 800x480)
 constexpr int CHAR_W = 8;
 constexpr int CHAR_H = 8;
-constexpr int VIEW_COLS = 68; // 3D Viewport Width in characters
-constexpr int TOTAL_COLS = 100; // Full screen including minimap sidebar
+constexpr int TOTAL_COLS = 100;
 constexpr int ROWS = 60;
-constexpr int SCREEN_WIDTH = TOTAL_COLS * CHAR_W;  // 800
-constexpr int SCREEN_HEIGHT = ROWS * CHAR_H;       // 480
-constexpr int SCALE = 2;
+constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;  // 800
+constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;       // 480
 
 constexpr double FIXED_TIMESTEP = 1000.0 / 60.0;
 
-// World Map (Odd dimensions for perfect grid maze)
+// World Map Dimensions
 constexpr int MAP_W = 25;
 constexpr int MAP_H = 25;
 
@@ -40,6 +38,19 @@ constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
 // Audio Configuration
 constexpr int AUDIO_SAMPLE_RATE = 44100;
 constexpr int AUDIO_BUFFER_SIZE = 1024;
+
+// Game State Enum
+enum GameState {
+    STATE_TITLE,
+    STATE_PLAYING,
+    STATE_SUCCESS,
+    STATE_GAMEOVER
+};
+
+enum Difficulty {
+    DIFF_NORMAL = 0, // Fullscreen 3D view, no sidebar
+    DIFF_EASY   = 1  // Includes 2D minimap sidebar
+};
 
 // 8x8 Minimal Bitmap Font
 const uint8_t FONT_8X8[96][8] = {
@@ -81,6 +92,8 @@ struct Point { int x, y; };
 struct AudioState {
     float ambientPhase = 0.0f;
     float heartbeatPhase = 0.0f;
+    float sanity = 100.0f;
+    bool inGame = false;
 };
 
 void audioCallback(void* userdata, Uint8* stream, int len) {
@@ -89,15 +102,35 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
     int samples = len / sizeof(int16_t);
 
     for (int i = 0; i < samples; ++i) {
-        audio->ambientPhase += (45.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        if (!audio->inGame) {
+            buffer[i] = 0;
+            continue;
+        }
+
+        // Sub-bass 42Hz drone
+        audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
         if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
         float ambient = std::sin(audio->ambientPhase) * 0.08f;
 
-        buffer[i] = static_cast<int16_t>(std::clamp(ambient, -1.0f, 1.0f) * 32767.0f);
+        // Dynamic Heartbeat based on Sanity
+        float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
+        audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
+
+        float beatEnv = 0.0f;
+        float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
+        if (cyclePos < 0.15f) {
+            beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
+        } else if (cyclePos > 0.22f && cyclePos < 0.35f) {
+            beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
+        }
+        float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f);
+
+        buffer[i] = static_cast<int16_t>(std::clamp(ambient + heartbeat, -1.0f, 1.0f) * 32767.0f);
     }
 }
 
-class WalkAsciiEngine {
+class WalkAsciiHorrorEngine {
 private:
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
@@ -106,10 +139,20 @@ private:
     std::vector<uint32_t> pixelBuffer;
     bool isRunning = false;
 
+    GameState currentState = STATE_TITLE;
+    Difficulty currentDifficulty = DIFF_NORMAL;
+    int currentScale = 2; // Default scale 2x (1600x960)
+    int menuCursor = 0;
+
     AudioState audioState;
     int worldMap[MAP_H][MAP_W];
     Point startPos;
     Point endPos;
+
+    // Game Session Stats
+    int currentLevel = 1;
+    int totalSteps = 0;
+    float levelTime = 0.0f;
 
     struct Player {
         float posX = 1.5f;
@@ -117,16 +160,28 @@ private:
         float dirX = 1.0f;
         float dirY = 0.0f;
         float planeX = 0.0f;
-        float planeY = 0.66f; // ~66 deg FOV
+        float planeY = 0.66f;
         float moveSpeed = 3.2f;
         float rotSpeed = 2.6f;
 
         int forward = 0;
         int rotate = 0;
-        int stepsTaken = 0;
-        float prevStepDist = 0.0f;
-        bool completed = false;
+        float stepAccumulator = 0.0f;
+        float sanity = 100.0f;
     } player;
+
+    struct Monster {
+        float x = 12.5f;
+        float y = 12.5f;
+        float speed = 1.6f;
+    } stalker;
+
+    void updateWindowScale() {
+        if (window) {
+            SDL_SetWindowSize(window, NATIVE_WIDTH * currentScale, NATIVE_HEIGHT * currentScale);
+            SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+    }
 
     void generateMaze() {
         for (int r = 0; r < MAP_H; ++r) {
@@ -166,7 +221,7 @@ private:
         }
 
         endPos = { MAP_W - 2, MAP_H - 2 };
-        worldMap[endPos.y][endPos.x] = 2; // Goal Cell (Red Walls)
+        worldMap[endPos.y][endPos.x] = 2; // Goal (Red)
 
         player.posX = startPos.x + 0.5f;
         player.posY = startPos.y + 0.5f;
@@ -174,8 +229,32 @@ private:
         player.dirY = 0.0f;
         player.planeX = 0.0f;
         player.planeY = 0.66f;
-        player.stepsTaken = 0;
-        player.completed = false;
+        player.stepAccumulator = 0.0f;
+
+        // Position Stalker halfway down the map
+        stalker.x = MAP_W / 2 + 0.5f;
+        stalker.y = MAP_H / 2 + 0.5f;
+    }
+
+    void startNewGame() {
+        currentLevel = 1;
+        totalSteps = 0;
+        levelTime = 0.0f;
+        player.sanity = 100.0f;
+        generateMaze();
+        currentState = STATE_PLAYING;
+
+        SDL_LockAudioDevice(audioDevice);
+        audioState.inGame = true;
+        audioState.sanity = 100.0f;
+        SDL_UnlockAudioDevice(audioDevice);
+    }
+
+    void nextLevel() {
+        currentLevel++;
+        player.sanity = std::min(100.0f, player.sanity + 25.0f); // Reward sanity on level clear
+        generateMaze();
+        currentState = STATE_PLAYING;
     }
 
     void drawGlyph(int col, int row, char c, uint32_t fgColor) {
@@ -187,7 +266,7 @@ private:
         for (int y = 0; y < CHAR_H; ++y) {
             for (int x = 0; x < CHAR_W; ++x) {
                 if ((glyph[y] >> (7 - x)) & 1) {
-                    pixelBuffer[(startY + y) * SCREEN_WIDTH + (startX + x)] = fgColor;
+                    pixelBuffer[(startY + y) * NATIVE_WIDTH + (startX + x)] = fgColor;
                 }
             }
         }
@@ -201,21 +280,6 @@ private:
         }
     }
 
-    void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color) {
-        int x0 = startCol * CHAR_W;
-        int y0 = startRow * CHAR_H;
-        int w = numCols * CHAR_W;
-        int h = numRows * CHAR_H;
-
-        for (int y = y0; y < y0 + h; ++y) {
-            if (y < 0 || y >= SCREEN_HEIGHT) continue;
-            for (int x = x0; x < x0 + w; ++x) {
-                if (x < 0 || x >= SCREEN_WIDTH) continue;
-                pixelBuffer[y * SCREEN_WIDTH + x] = color;
-            }
-        }
-    }
-
 public:
     bool init() {
         srand(static_cast<unsigned int>(time(nullptr)));
@@ -223,9 +287,9 @@ public:
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) return false;
 
         window = SDL_CreateWindow(
-            "Walk ASCII 3D Port",
+            "Walk ASCII 3D Horror",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-            SCREEN_WIDTH * SCALE, SCREEN_HEIGHT * SCALE,
+            NATIVE_WIDTH * currentScale, NATIVE_HEIGHT * currentScale,
             SDL_WINDOW_SHOWN
         );
 
@@ -234,10 +298,10 @@ public:
             renderer,
             SDL_PIXELFORMAT_ARGB8888,
             SDL_TEXTUREACCESS_STREAMING,
-            SCREEN_WIDTH, SCREEN_HEIGHT
+            NATIVE_WIDTH, NATIVE_HEIGHT
         );
 
-        pixelBuffer.resize(SCREEN_WIDTH * SCREEN_HEIGHT, 0xFF000000);
+        pixelBuffer.resize(NATIVE_WIDTH * NATIVE_HEIGHT, 0xFF000000);
 
         SDL_AudioSpec wantedSpec;
         SDL_zero(wantedSpec);
@@ -251,7 +315,6 @@ public:
         audioDevice = SDL_OpenAudioDevice(nullptr, 0, &wantedSpec, nullptr, 0);
         if (audioDevice != 0) SDL_PauseAudioDevice(audioDevice, 0);
 
-        generateMaze();
         isRunning = true;
         return true;
     }
@@ -260,25 +323,76 @@ public:
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) isRunning = false;
+
             if (event.type == SDL_KEYDOWN) {
-                if (event.key.keysym.sym == SDLK_r) generateMaze();
+                if (currentState == STATE_TITLE) {
+                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) {
+                        menuCursor = (menuCursor - 1 + 3) % 3;
+                    }
+                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) {
+                        menuCursor = (menuCursor + 1) % 3;
+                    }
+                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
+                        if (menuCursor == 0) {
+                            startNewGame();
+                        } else if (menuCursor == 1) {
+                            currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
+                        } else if (menuCursor == 2) {
+                            currentScale = (currentScale % 4) + 1; // Cycle 1x -> 2x -> 3x -> 4x
+                            updateWindowScale();
+                        }
+                    }
+                    if (event.key.keysym.sym == SDLK_LEFT || event.key.keysym.sym == SDLK_RIGHT) {
+                        if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
+                        if (menuCursor == 2) {
+                            currentScale = (event.key.keysym.sym == SDLK_RIGHT) ? ((currentScale % 4) + 1) : ((currentScale - 2 + 4) % 4 + 1);
+                            updateWindowScale();
+                        }
+                    }
+                }
+                else if (currentState == STATE_SUCCESS) {
+                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
+                        nextLevel();
+                    }
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_TITLE;
+                    }
+                }
+                else if (currentState == STATE_GAMEOVER) {
+                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
+                        startNewGame();
+                    }
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_TITLE;
+                    }
+                }
+                else if (currentState == STATE_PLAYING) {
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_TITLE;
+                    }
+                }
             }
         }
 
-        const uint8_t* state = SDL_GetKeyboardState(NULL);
-        player.forward = 0;
-        player.rotate = 0;
+        if (currentState == STATE_PLAYING) {
+            const uint8_t* state = SDL_GetKeyboardState(NULL);
+            player.forward = 0;
+            player.rotate = 0;
 
-        if (state[SDL_SCANCODE_W] || state[SDL_SCANCODE_UP])    player.forward += 1;
-        if (state[SDL_SCANCODE_S] || state[SDL_SCANCODE_DOWN])  player.forward -= 1;
-        if (state[SDL_SCANCODE_A] || state[SDL_SCANCODE_LEFT])  player.rotate -= 1;
-        if (state[SDL_SCANCODE_D] || state[SDL_SCANCODE_RIGHT]) player.rotate += 1;
+            if (state[SDL_SCANCODE_W] || state[SDL_SCANCODE_UP])    player.forward += 1;
+            if (state[SDL_SCANCODE_S] || state[SDL_SCANCODE_DOWN])  player.forward -= 1;
+            if (state[SDL_SCANCODE_A] || state[SDL_SCANCODE_LEFT])  player.rotate -= 1;
+            if (state[SDL_SCANCODE_D] || state[SDL_SCANCODE_RIGHT]) player.rotate += 1;
+        }
     }
 
     void update(double dt) {
-        float dtSec = static_cast<float>(dt);
+        if (currentState != STATE_PLAYING) return;
 
-        // Rotation
+        float dtSec = static_cast<float>(dt);
+        levelTime += dtSec;
+
+        // 1. Rotation
         if (player.rotate != 0) {
             float rot = player.rotate * player.rotSpeed * dtSec;
             float oldDirX = player.dirX;
@@ -290,7 +404,7 @@ public:
             player.planeY = oldPlaneX * sin(rot) + player.planeY * cos(rot);
         }
 
-        // Movement with Collision & Step Tracking
+        // 2. Movement & Step Counting
         if (player.forward != 0) {
             float step = player.forward * player.moveSpeed * dtSec;
             float buf = (step > 0) ? 0.35f : -0.35f;
@@ -303,24 +417,65 @@ public:
             if (worldMap[int(player.posY + player.dirY * (step + buf))][int(player.posX)] != 1)
                 player.posY += player.dirY * step;
 
-            // Step counter accumulation
-            player.prevStepDist += std::hypot(player.posX - prevX, player.posY - prevY);
-            if (player.prevStepDist >= 1.0f) {
-                player.stepsTaken++;
-                player.prevStepDist = 0.0f;
+            player.stepAccumulator += std::hypot(player.posX - prevX, player.posY - prevY);
+            if (player.stepAccumulator >= 1.0f) {
+                totalSteps++;
+                player.stepAccumulator = 0.0f;
             }
         }
 
-        // Win check
-        if (int(player.posX) == endPos.x && int(player.posY) == endPos.y) {
-            player.completed = true;
+        // 3. Stalker AI & Sanity Drain
+        float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
+        if (distToMonster < 8.0f) {
+            float dx = (player.posX - stalker.x) / distToMonster;
+            float dy = (player.posY - stalker.y) / distToMonster;
+
+            float nx = stalker.x + dx * stalker.speed * dtSec;
+            float ny = stalker.y + dy * stalker.speed * dtSec;
+
+            if (worldMap[int(ny)][int(nx)] == 0) {
+                stalker.x = nx;
+                stalker.y = ny;
+            }
+
+            // Sanity drain increases drastically when close
+            player.sanity -= (14.0f / distToMonster) * dtSec;
+        } else {
+            // Natural slight sanity drain from darkness
+            player.sanity -= 0.5f * dtSec;
         }
+
+        // Sanity Clamp & Game Over Check
+        player.sanity = std::max(0.0f, player.sanity);
+        if (player.sanity <= 0.0f) {
+            currentState = STATE_GAMEOVER;
+            SDL_LockAudioDevice(audioDevice);
+            audioState.inGame = false;
+            SDL_UnlockAudioDevice(audioDevice);
+            return;
+        }
+
+        // Win Check
+        if (int(player.posX) == endPos.x && int(player.posY) == endPos.y) {
+            currentState = STATE_SUCCESS;
+            SDL_LockAudioDevice(audioDevice);
+            audioState.inGame = false;
+            SDL_UnlockAudioDevice(audioDevice);
+            return;
+        }
+
+        // Audio update
+        SDL_LockAudioDevice(audioDevice);
+        audioState.sanity = player.sanity;
+        SDL_UnlockAudioDevice(audioDevice);
     }
 
-    // --- ACCURATE ORIENTATION & DEPTH SHADER ---
+    // --- 3D ASCII VIEWPORT RENDERER ---
     void render3DView() {
-        for (int col = 0; col < VIEW_COLS; ++col) {
-            float cameraX = 2.0f * col / float(VIEW_COLS) - 1.0f;
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+
+        for (int col = 0; col < viewWidth; ++col) {
+            float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
             float rayDirX = player.dirX + player.planeX * cameraX;
             float rayDirY = player.dirY + player.planeY * cameraX;
 
@@ -330,7 +485,7 @@ public:
             float deltaDistX = (rayDirX == 0) ? 1e30f : std::abs(1.0f / rayDirX);
             float deltaDistY = (rayDirY == 0) ? 1e30f : std::abs(1.0f / rayDirY);
             float sideDistX, sideDistY, perpWallDist;
-            int stepX, stepY, hit = 0, side = 0; // side 0 = East/West, side 1 = North/South
+            int stepX, stepY, hit = 0, side = 0;
 
             if (rayDirX < 0) { stepX = -1; sideDistX = (player.posX - mapX) * deltaDistX; }
             else             { stepX =  1; sideDistX = (mapX + 1.0f - player.posX) * deltaDistX; }
@@ -353,7 +508,7 @@ public:
             int drawStart = -lineHeight / 2 + ROWS / 2;
             int drawEnd = lineHeight / 2 + ROWS / 2;
 
-            // 1. Determine Wall Glyph based on Distance Layer
+            // Distance Glyph Layering
             char wallGlyph = ' ';
             if (perpWallDist <= 1.25f)      wallGlyph = '@';
             else if (perpWallDist <= 2.50f) wallGlyph = '#';
@@ -362,48 +517,46 @@ public:
             else if (perpWallDist <= 7.50f) wallGlyph = '+';
             else if (perpWallDist <= 9.00f) wallGlyph = '-';
             else if (perpWallDist <= 11.0f) wallGlyph = '.';
-            else                            wallGlyph = ' '; // Pitch black fog beyond 11 units
 
-            // 2. Determine Color by Side (Orientation Shading)
+            // Orientation Shading
             uint32_t wallColor;
             if (hit == 2) {
-                // Goal Wall (Red)
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
             } else {
-                // Normal Maze Wall (Green)
                 if (side == 0) {
-                    // East/West facing (Light shade)
                     if (perpWallDist < 3.0f)      wallColor = CRT_LIGHT_BRIGHT;
                     else if (perpWallDist < 6.5f) wallColor = CRT_LIGHT_MID;
                     else                          wallColor = CRT_LIGHT_DIM;
                 } else {
-                    // North/South facing (Dark shade)
                     if (perpWallDist < 3.0f)      wallColor = CRT_DARK_BRIGHT;
                     else if (perpWallDist < 6.5f) wallColor = CRT_DARK_MID;
                     else                          wallColor = CRT_DARK_DIM;
                 }
             }
 
-            // Draw Column
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
                     drawGlyph(col, r, wallGlyph, wallColor);
                 }
             }
         }
+
+        // HUD Bar
+        drawText(2, 2, "LEVEL: " + std::to_string(currentLevel) + " | STEPS: " + std::to_string(totalSteps), CRT_LIGHT_MID);
+        
+        uint32_t sanityCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : CRT_LIGHT_BRIGHT);
+        drawText(2, 4, "SANITY: " + std::to_string(int(player.sanity)) + "%", sanityCol);
+
+        if (currentDifficulty == DIFF_EASY) {
+            renderSidebarMinimap();
+        }
     }
 
-    // --- SIDEBAR MINIMAP & UI ---
-    void renderSidebarUI() {
-        // Vertical Divider line between 3D view and sidebar
+    void renderSidebarMinimap() {
         for (int r = 0; r < ROWS; ++r) {
-            drawGlyph(VIEW_COLS, r, '|', 0xFF334155);
+            drawGlyph(68, r, '|', 0xFF334155);
         }
 
-        // Top Header
-        drawText(2, 1, "Walk ASCII 3D", 0xFFFFFFFF);
-
-        // Top-Right Minimap Box
         int miniStartX = 72;
         int miniStartY = 3;
 
@@ -414,60 +567,94 @@ public:
 
                 if (worldMap[r][c] == 1) {
                     mapCh = '#';
-                    mapCol = 0xFF475569; // Wall
+                    mapCol = 0xFF475569;
                 } else if (r == startPos.y && c == startPos.x) {
                     mapCh = 'S';
-                    mapCol = 0xFF22C55E; // Start
+                    mapCol = CRT_LIGHT_BRIGHT;
                 } else if (r == endPos.y && c == endPos.x) {
                     mapCh = 'E';
-                    mapCol = 0xFFEF4444; // End
+                    mapCol = RED_GOAL_BRIGHT;
                 }
 
                 drawGlyph(miniStartX + c, miniStartY + r, mapCh, mapCol);
             }
         }
 
-        // Player Dot on Minimap
-        int pCol = miniStartX + int(player.posX);
-        int pRow = miniStartY + int(player.posY);
-        drawGlyph(pCol, pRow, 'O', 0xFF38BDF8);
+        // Player marker
+        drawGlyph(miniStartX + int(player.posX), miniStartY + int(player.posY), 'O', 0xFF38BDF8);
 
-        // Player Forward View Indicator Ray
-        int pRayCol = miniStartX + int(player.posX + player.dirX * 1.5f);
-        int pRayRow = miniStartY + int(player.posY + player.dirY * 1.5f);
-        if (pRayCol != pCol || pRayRow != pRow) {
-            drawGlyph(pRayCol, pRayRow, '*', 0xFF0284C7);
+        // Sidebar stats
+        drawText(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
+        drawText(72, 35, "[S] Start  [E] End", 0xFF64748B);
+        drawText(72, 37, "[O] Player Position", 0xFF64748B);
+    }
+
+    // --- SCREEN STATE RENDERING ---
+    void renderTitleScreen() {
+        drawText(34, 12, "==============================", CRT_LIGHT_BRIGHT);
+        drawText(34, 14, "     WALK ASCII 3D HORROR     ", CRT_LIGHT_BRIGHT);
+        drawText(34, 16, "==============================", CRT_LIGHT_BRIGHT);
+
+        std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
+        std::string resStr = std::to_string(NATIVE_WIDTH * currentScale) + "x" + std::to_string(NATIVE_HEIGHT * currentScale) + " (" + std::to_string(currentScale) + "X)";
+
+        std::string options[3] = {
+            "START GAME",
+            "DIFFICULTY: " + diffStr,
+            "RESOLUTION: " + resStr
+        };
+
+        for (int i = 0; i < 3; ++i) {
+            uint32_t col = (i == menuCursor) ? CRT_LIGHT_BRIGHT : 0xFF64748B;
+            std::string prefix = (i == menuCursor) ? "-> " : "   ";
+            drawText(32, 24 + i * 4, prefix + options[i], col);
         }
 
-        // Controls & Progress Telemetry
-        int uiBaseY = 32;
-        drawText(72, uiBaseY,     "[S] Start  [E] End  [O] You", 0xFF94A3B8);
-        drawText(72, uiBaseY + 3, "W A S D / Arrows to move", 0xFFE2E8F0);
+        drawText(26, 44, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
+    }
 
-        // Step Counter
-        drawText(72, uiBaseY + 7, "Steps: " + std::to_string(player.stepsTaken), 0xFFFFFFFF);
+    void renderSuccessScreen() {
+        drawText(36, 12, "****************************", CRT_LIGHT_BRIGHT);
+        drawText(36, 14, "      MAZE COMPLETED!       ", CRT_LIGHT_BRIGHT);
+        drawText(36, 16, "****************************", CRT_LIGHT_BRIGHT);
 
-        // Progress bar percentage
-        float totalDist = std::hypot(endPos.x - startPos.x, endPos.y - startPos.y);
-        float currDist = std::hypot(endPos.x - player.posX, endPos.y - player.posY);
-        int progress = std::clamp(int((1.0f - currDist / totalDist) * 100.0f), 0, 100);
-        drawText(72, uiBaseY + 9, "Progress: " + std::to_string(progress) + "%", 0xFF22C55E);
+        drawText(34, 22, "COMPLETED LEVEL: " + std::to_string(currentLevel), 0xFFFFFFFF);
+        drawText(34, 25, "TOTAL STEPS:     " + std::to_string(totalSteps), 0xFFFFFFFF);
+        drawText(34, 28, "TIME TAKEN:      " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
+        drawText(34, 31, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", CRT_LIGHT_BRIGHT);
 
-        // Win Banner
-        if (player.completed) {
-            drawRectFilled(12, 22, 44, 8, 0xFF0F172A);
-            drawText(20, 24, "MAZE COMPLETED!", 0xFF4ADE80);
-            drawText(18, 26, "Total Steps: " + std::to_string(player.stepsTaken) + " | Press R", 0xFFFFFFFF);
-        }
+        drawText(30, 42, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", CRT_LIGHT_MID);
+        drawText(38, 45, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
+    }
+
+    void renderGameOverScreen() {
+        drawText(36, 12, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
+        drawText(36, 14, "        SANITY LOST         ", RED_GOAL_BRIGHT);
+        drawText(36, 16, "         GAME OVER          ", RED_GOAL_BRIGHT);
+        drawText(36, 18, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
+
+        drawText(34, 24, "DIED AT LEVEL:   " + std::to_string(currentLevel), 0xFFCBD5E1);
+        drawText(34, 27, "TOTAL STEPS:     " + std::to_string(totalSteps), 0xFFCBD5E1);
+        drawText(34, 30, "SURVIVED TIME:   " + std::to_string(int(levelTime)) + " SECONDS", 0xFFCBD5E1);
+
+        drawText(32, 40, "PRESS [ENTER / SPACE] TO TRY AGAIN", CRT_LIGHT_BRIGHT);
+        drawText(38, 43, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
     void render() {
-        std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF0B0F17); // Dark backdrop
+        std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF080C14);
 
-        render3DView();
-        renderSidebarUI();
+        if (currentState == STATE_TITLE) {
+            renderTitleScreen();
+        } else if (currentState == STATE_PLAYING) {
+            render3DView();
+        } else if (currentState == STATE_SUCCESS) {
+            renderSuccessScreen();
+        } else if (currentState == STATE_GAMEOVER) {
+            renderGameOverScreen();
+        }
 
-        SDL_UpdateTexture(screenTexture, nullptr, pixelBuffer.data(), SCREEN_WIDTH * sizeof(uint32_t));
+        SDL_UpdateTexture(screenTexture, nullptr, pixelBuffer.data(), NATIVE_WIDTH * sizeof(uint32_t));
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, screenTexture, nullptr, nullptr);
         SDL_RenderPresent(renderer);
@@ -504,7 +691,7 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    WalkAsciiEngine engine;
+    WalkAsciiHorrorEngine engine;
     if (engine.init()) engine.run();
     engine.cleanup();
     return 0;
