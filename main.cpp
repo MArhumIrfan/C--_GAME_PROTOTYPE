@@ -39,7 +39,6 @@ constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
 constexpr int AUDIO_SAMPLE_RATE = 44100;
 constexpr int AUDIO_BUFFER_SIZE = 1024;
 
-// Game State Enum
 enum GameState {
     STATE_TITLE,
     STATE_PLAYING,
@@ -48,7 +47,7 @@ enum GameState {
 };
 
 enum Difficulty {
-    DIFF_NORMAL = 0, // Fullscreen 3D view, no sidebar
+    DIFF_NORMAL = 0, // Fullscreen 3D view
     DIFF_EASY   = 1  // Includes 2D minimap sidebar
 };
 
@@ -92,7 +91,10 @@ struct Point { int x, y; };
 struct AudioState {
     float ambientPhase = 0.0f;
     float heartbeatPhase = 0.0f;
+    float monsterPhase = 0.0f;
     float sanity = 100.0f;
+    float monsterDist = 20.0f;
+    bool isChasing = false;
     bool inGame = false;
 };
 
@@ -126,7 +128,19 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         }
         float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f);
 
-        buffer[i] = static_cast<int16_t>(std::clamp(ambient + heartbeat, -1.0f, 1.0f) * 32767.0f);
+        // Monster Growl Audio (triggers when within 10 units)
+        float monsterAudio = 0.0f;
+        if (audio->monsterDist < 10.0f) {
+            float proxVol = 1.0f - (audio->monsterDist / 10.0f);
+            float breathFreq = audio->isChasing ? 2.5f : 0.8f;
+            audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
+
+            float noise = ((rand() % 2000) / 1000.0f - 1.0f);
+            monsterAudio = noise * (std::sin(audio->monsterPhase) * 0.5f + 0.5f) * proxVol * 0.4f;
+        }
+
+        buffer[i] = static_cast<int16_t>(std::clamp(ambient + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
     }
 }
 
@@ -141,7 +155,7 @@ private:
 
     GameState currentState = STATE_TITLE;
     Difficulty currentDifficulty = DIFF_NORMAL;
-    int currentScale = 2; // Default scale 2x (1600x960)
+    int currentScale = 2;
     int menuCursor = 0;
 
     AudioState audioState;
@@ -149,10 +163,10 @@ private:
     Point startPos;
     Point endPos;
 
-    // Game Session Stats
     int currentLevel = 1;
     int totalSteps = 0;
     float levelTime = 0.0f;
+    std::string deathReason = "";
 
     struct Player {
         float posX = 1.5f;
@@ -167,13 +181,17 @@ private:
         int forward = 0;
         int rotate = 0;
         float stepAccumulator = 0.0f;
+        
         float sanity = 100.0f;
+        float health = 100.0f;
+        bool takingDamage = false;
     } player;
 
     struct Monster {
         float x = 12.5f;
         float y = 12.5f;
-        float speed = 1.6f;
+        float speed = 1.8f;
+        bool isChasing = false;
     } stalker;
 
     void updateWindowScale() {
@@ -221,7 +239,7 @@ private:
         }
 
         endPos = { MAP_W - 2, MAP_H - 2 };
-        worldMap[endPos.y][endPos.x] = 2; // Goal (Red)
+        worldMap[endPos.y][endPos.x] = 2;
 
         player.posX = startPos.x + 0.5f;
         player.posY = startPos.y + 0.5f;
@@ -231,9 +249,9 @@ private:
         player.planeY = 0.66f;
         player.stepAccumulator = 0.0f;
 
-        // Position Stalker halfway down the map
         stalker.x = MAP_W / 2 + 0.5f;
         stalker.y = MAP_H / 2 + 0.5f;
+        stalker.isChasing = false;
     }
 
     void startNewGame() {
@@ -241,20 +259,27 @@ private:
         totalSteps = 0;
         levelTime = 0.0f;
         player.sanity = 100.0f;
+        player.health = 100.0f;
         generateMaze();
         currentState = STATE_PLAYING;
 
         SDL_LockAudioDevice(audioDevice);
         audioState.inGame = true;
         audioState.sanity = 100.0f;
+        audioState.monsterDist = 20.0f;
         SDL_UnlockAudioDevice(audioDevice);
     }
 
     void nextLevel() {
         currentLevel++;
-        player.sanity = std::min(100.0f, player.sanity + 25.0f); // Reward sanity on level clear
+        player.sanity = std::min(100.0f, player.sanity + 30.0f);
+        player.health = std::min(100.0f, player.health + 30.0f);
         generateMaze();
         currentState = STATE_PLAYING;
+
+        SDL_LockAudioDevice(audioDevice);
+        audioState.inGame = true;
+        SDL_UnlockAudioDevice(audioDevice);
     }
 
     void drawGlyph(int col, int row, char c, uint32_t fgColor) {
@@ -333,12 +358,10 @@ public:
                         menuCursor = (menuCursor + 1) % 3;
                     }
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
-                        if (menuCursor == 0) {
-                            startNewGame();
-                        } else if (menuCursor == 1) {
-                            currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
-                        } else if (menuCursor == 2) {
-                            currentScale = (currentScale % 4) + 1; // Cycle 1x -> 2x -> 3x -> 4x
+                        if (menuCursor == 0) startNewGame();
+                        else if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
+                        else if (menuCursor == 2) {
+                            currentScale = (currentScale % 4) + 1;
                             updateWindowScale();
                         }
                     }
@@ -351,25 +374,15 @@ public:
                     }
                 }
                 else if (currentState == STATE_SUCCESS) {
-                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
-                        nextLevel();
-                    }
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        currentState = STATE_TITLE;
-                    }
+                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) nextLevel();
+                    if (event.key.keysym.sym == SDLK_ESCAPE) currentState = STATE_TITLE;
                 }
                 else if (currentState == STATE_GAMEOVER) {
-                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
-                        startNewGame();
-                    }
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        currentState = STATE_TITLE;
-                    }
+                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) startNewGame();
+                    if (event.key.keysym.sym == SDLK_ESCAPE) currentState = STATE_TITLE;
                 }
                 else if (currentState == STATE_PLAYING) {
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        currentState = STATE_TITLE;
-                    }
+                    if (event.key.keysym.sym == SDLK_ESCAPE) currentState = STATE_TITLE;
                 }
             }
         }
@@ -391,6 +404,7 @@ public:
 
         float dtSec = static_cast<float>(dt);
         levelTime += dtSec;
+        player.takingDamage = false;
 
         // 1. Rotation
         if (player.rotate != 0) {
@@ -404,7 +418,7 @@ public:
             player.planeY = oldPlaneX * sin(rot) + player.planeY * cos(rot);
         }
 
-        // 2. Movement & Step Counting
+        // 2. Movement & Step Accumulation
         if (player.forward != 0) {
             float step = player.forward * player.moveSpeed * dtSec;
             float buf = (step > 0) ? 0.35f : -0.35f;
@@ -424,9 +438,13 @@ public:
             }
         }
 
-        // 3. Stalker AI & Sanity Drain
+        // 3. Stalker AI, Proximity Audio, Attack & Recovery
         float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
-        if (distToMonster < 8.0f) {
+
+        if (distToMonster < 8.5f) {
+            stalker.isChasing = true;
+
+            // Move towards player
             float dx = (player.posX - stalker.x) / distToMonster;
             float dy = (player.posY - stalker.y) / distToMonster;
 
@@ -438,16 +456,33 @@ public:
                 stalker.y = ny;
             }
 
-            // Sanity drain increases drastically when close
-            player.sanity -= (14.0f / distToMonster) * dtSec;
+            // Proximity Fear / Noise drains sanity proportionally
+            player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
+
+            // Physical Attack within close contact (< 1.1 units)
+            if (distToMonster < 1.1f) {
+                player.health -= 28.0f * dtSec; // Monster claws attack
+                player.takingDamage = true;
+            }
         } else {
-            // Natural slight sanity drain from darkness
-            player.sanity -= 0.5f * dtSec;
+            stalker.isChasing = false;
+
+            // Slow ambient darkness drain calibrated for 6-12 min exploration
+            player.sanity -= 0.08f * dtSec;
+
+            // Outrun Recovery: If far from monster (> 12 units), recover sanity and health
+            if (distToMonster > 12.0f) {
+                player.sanity = std::min(100.0f, player.sanity + 1.0f * dtSec);
+                player.health = std::min(100.0f, player.health + 0.8f * dtSec);
+            }
         }
 
-        // Sanity Clamp & Game Over Check
+        // 4. Defeat Conditions
         player.sanity = std::max(0.0f, player.sanity);
+        player.health = std::max(0.0f, player.health);
+
         if (player.sanity <= 0.0f) {
+            deathReason = "LOST TO THE TERROR (SANITY DEPLETED)";
             currentState = STATE_GAMEOVER;
             SDL_LockAudioDevice(audioDevice);
             audioState.inGame = false;
@@ -455,7 +490,16 @@ public:
             return;
         }
 
-        // Win Check
+        if (player.health <= 0.0f) {
+            deathReason = "SLAIN BY THE STALKER (HEALTH DEPLETED)";
+            currentState = STATE_GAMEOVER;
+            SDL_LockAudioDevice(audioDevice);
+            audioState.inGame = false;
+            SDL_UnlockAudioDevice(audioDevice);
+            return;
+        }
+
+        // Win Condition
         if (int(player.posX) == endPos.x && int(player.posY) == endPos.y) {
             currentState = STATE_SUCCESS;
             SDL_LockAudioDevice(audioDevice);
@@ -464,13 +508,14 @@ public:
             return;
         }
 
-        // Audio update
+        // Sync Audio Telemetry
         SDL_LockAudioDevice(audioDevice);
         audioState.sanity = player.sanity;
+        audioState.monsterDist = distToMonster;
+        audioState.isChasing = stalker.isChasing;
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    // --- 3D ASCII VIEWPORT RENDERER ---
     void render3DView() {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
 
@@ -508,7 +553,6 @@ public:
             int drawStart = -lineHeight / 2 + ROWS / 2;
             int drawEnd = lineHeight / 2 + ROWS / 2;
 
-            // Distance Glyph Layering
             char wallGlyph = ' ';
             if (perpWallDist <= 1.25f)      wallGlyph = '@';
             else if (perpWallDist <= 2.50f) wallGlyph = '#';
@@ -518,7 +562,6 @@ public:
             else if (perpWallDist <= 9.00f) wallGlyph = '-';
             else if (perpWallDist <= 11.0f) wallGlyph = '.';
 
-            // Orientation Shading
             uint32_t wallColor;
             if (hit == 2) {
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
@@ -541,11 +584,19 @@ public:
             }
         }
 
-        // HUD Bar
+        // Damage Flashing HUD Warning
+        if (player.takingDamage) {
+            drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
+        }
+
+        // Live HUD
         drawText(2, 2, "LEVEL: " + std::to_string(currentLevel) + " | STEPS: " + std::to_string(totalSteps), CRT_LIGHT_MID);
         
-        uint32_t sanityCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : CRT_LIGHT_BRIGHT);
-        drawText(2, 4, "SANITY: " + std::to_string(int(player.sanity)) + "%", sanityCol);
+        uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : CRT_LIGHT_BRIGHT);
+        drawText(2, 4, "HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
+
+        uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : CRT_LIGHT_BRIGHT);
+        drawText(2, 6, "SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
 
         if (currentDifficulty == DIFF_EASY) {
             renderSidebarMinimap();
@@ -580,16 +631,13 @@ public:
             }
         }
 
-        // Player marker
         drawGlyph(miniStartX + int(player.posX), miniStartY + int(player.posY), 'O', 0xFF38BDF8);
 
-        // Sidebar stats
         drawText(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
         drawText(72, 35, "[S] Start  [E] End", 0xFF64748B);
         drawText(72, 37, "[O] Player Position", 0xFF64748B);
     }
 
-    // --- SCREEN STATE RENDERING ---
     void renderTitleScreen() {
         drawText(34, 12, "==============================", CRT_LIGHT_BRIGHT);
         drawText(34, 14, "     WALK ASCII 3D HORROR     ", CRT_LIGHT_BRIGHT);
@@ -618,27 +666,29 @@ public:
         drawText(36, 14, "      MAZE COMPLETED!       ", CRT_LIGHT_BRIGHT);
         drawText(36, 16, "****************************", CRT_LIGHT_BRIGHT);
 
-        drawText(34, 22, "COMPLETED LEVEL: " + std::to_string(currentLevel), 0xFFFFFFFF);
-        drawText(34, 25, "TOTAL STEPS:     " + std::to_string(totalSteps), 0xFFFFFFFF);
-        drawText(34, 28, "TIME TAKEN:      " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
-        drawText(34, 31, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", CRT_LIGHT_BRIGHT);
+        drawText(34, 22, "COMPLETED LEVEL:  " + std::to_string(currentLevel), 0xFFFFFFFF);
+        drawText(34, 25, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFFFFFFF);
+        drawText(34, 28, "TIME TAKEN:       " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
+        drawText(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", CRT_LIGHT_BRIGHT);
+        drawText(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", CRT_LIGHT_BRIGHT);
 
-        drawText(30, 42, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", CRT_LIGHT_MID);
-        drawText(38, 45, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
+        drawText(28, 44, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", CRT_LIGHT_MID);
+        drawText(38, 47, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
     void renderGameOverScreen() {
-        drawText(36, 12, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
-        drawText(36, 14, "        SANITY LOST         ", RED_GOAL_BRIGHT);
-        drawText(36, 16, "         GAME OVER          ", RED_GOAL_BRIGHT);
-        drawText(36, 18, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
+        drawText(36, 10, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
+        drawText(36, 12, "         GAME OVER          ", RED_GOAL_BRIGHT);
+        drawText(36, 14, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
 
-        drawText(34, 24, "DIED AT LEVEL:   " + std::to_string(currentLevel), 0xFFCBD5E1);
-        drawText(34, 27, "TOTAL STEPS:     " + std::to_string(totalSteps), 0xFFCBD5E1);
-        drawText(34, 30, "SURVIVED TIME:   " + std::to_string(int(levelTime)) + " SECONDS", 0xFFCBD5E1);
+        drawText(28, 20, deathReason, RED_GOAL_BRIGHT);
 
-        drawText(32, 40, "PRESS [ENTER / SPACE] TO TRY AGAIN", CRT_LIGHT_BRIGHT);
-        drawText(38, 43, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
+        drawText(34, 26, "DIED AT LEVEL:    " + std::to_string(currentLevel), 0xFFCBD5E1);
+        drawText(34, 29, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFCBD5E1);
+        drawText(34, 32, "SURVIVED TIME:    " + std::to_string(int(levelTime)) + " SECONDS", 0xFFCBD5E1);
+
+        drawText(32, 42, "PRESS [ENTER / SPACE] TO TRY AGAIN", CRT_LIGHT_BRIGHT);
+        drawText(38, 45, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
     void render() {
