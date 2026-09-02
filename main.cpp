@@ -13,8 +13,8 @@ constexpr int CHAR_W = 8;
 constexpr int CHAR_H = 8;
 constexpr int TOTAL_COLS = 100;
 constexpr int ROWS = 60;
-constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;
-constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;
+constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;  
+constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;       
 
 struct ResolutionPreset {
     int width;
@@ -136,7 +136,6 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
             continue;
         }
 
-        // Corruption seamlessly gates the audio channels
         float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
         float mixHeart   = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
         float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
@@ -193,7 +192,7 @@ private:
     int currentLevel = 1;
     int totalSteps = 0;
     float levelTime = 0.0f;
-    float corruptionLevel = 0.0f; // The Global Anomaly Tracker
+    float corruptionLevel = 0.0f; 
     std::string deathReason = "";
 
     struct Player {
@@ -243,13 +242,11 @@ private:
     uint32_t getElevationColor(float elevation, float dist, int side) {
         uint32_t cBright, cMid, cDark;
 
-        // Phase 4: Extreme corruption shifts to Nightmare Red palette
         if (corruptionLevel >= 0.85f) {
             cBright = CORRUPT_BRIGHT;
             cMid    = CORRUPT_MID;
             cDark   = CORRUPT_DARK;
         } else {
-            // Standard clean green palettes
             if (elevation >= 0.85f) {
                 cBright = TIER_HIGH_BRIGHT;
                 cMid    = TIER_HIGH_MID;
@@ -265,7 +262,6 @@ private:
             }
         }
 
-        // Random subtle visual glitched color
         if (corruptionLevel >= 0.4f && (rand() % 100) < int(corruptionLevel * 5)) {
             return CORRUPT_BRIGHT;
         }
@@ -355,7 +351,7 @@ private:
         currentLevel = 1;
         totalSteps = 0;
         levelTime = 0.0f;
-        corruptionLevel = 0.0f; // Start totally pure
+        corruptionLevel = 0.0f; 
         player.sanity = 100.0f;
         player.health = 100.0f;
         generateMazeWithOverpass();
@@ -375,7 +371,6 @@ private:
         player.sanity = std::min(100.0f, player.sanity + 30.0f);
         player.health = std::min(100.0f, player.health + 30.0f);
         
-        // Increase corruption dynamically. 0.0 -> 0.11 -> 0.22 ... -> 0.99
         corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.11f);
         
         generateMazeWithOverpass();
@@ -407,6 +402,22 @@ private:
         for (size_t i = 0; i < text.size(); ++i) {
             if (col + i < TOTAL_COLS) {
                 drawGlyph(col + i, row, text[i], color);
+            }
+        }
+    }
+
+    // Solid Background Box Tool
+    void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color) {
+        int x0 = startCol * CHAR_W;
+        int y0 = startRow * CHAR_H;
+        int w = numCols * CHAR_W;
+        int h = numRows * CHAR_H;
+
+        for (int y = y0; y < y0 + h; ++y) {
+            if (y < 0 || y >= NATIVE_HEIGHT) continue;
+            for (int x = x0; x < x0 + w; ++x) {
+                if (x < 0 || x >= NATIVE_WIDTH) continue;
+                pixelBuffer[y * NATIVE_WIDTH + x] = color;
             }
         }
     }
@@ -540,12 +551,10 @@ public:
         levelTime += dtSec;
         player.takingDamage = false;
 
-        // 1. Corrected WASD Vector Movement
         if (player.forward != 0 || player.strafe != 0) {
             float forwardStep = player.forward * player.moveSpeed * dtSec;
             float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec;
 
-            // Strafe vector properly inverted to map A = left, D = right
             float moveX = player.dirX * forwardStep - player.dirY * strafeStep;
             float moveY = player.dirY * forwardStep + player.dirX * strafeStep;
 
@@ -580,7 +589,6 @@ public:
         player.targetPosZ = worldMap[currTileY][currTileX].floorH;
         player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
-        // 3. Stalker AI gated by Corruption Level (Phase 3+)
         float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
 
         if (corruptionLevel > 0.5f) {
@@ -611,7 +619,6 @@ public:
                 }
             }
         } else {
-            // Early levels: No sanity drain, no monster movement
             player.sanity = 100.0f;
         }
 
@@ -707,7 +714,6 @@ public:
             else           perpWallDist = (sideDistY - deltaDistY);
             if (perpWallDist < 0.05f) perpWallDist = 0.05f;
 
-            // Wall Vibration Glitch (Phase 3+)
             int vOffset = 0;
             if (corruptionLevel > 0.5f && (rand() % 100) < int(corruptionLevel * 20)) {
                 vOffset = (rand() % 5) - 2; 
@@ -735,7 +741,6 @@ public:
                         floorGlyph = (sampledFloorH > 0.8f) ? '^' : '.';
                     }
 
-                    // Corruption Glyph Glitching
                     if (corruptionLevel > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
                         floorGlyph = "?!@#$%^&*"[rand() % 9];
                     }
@@ -761,7 +766,6 @@ public:
             else if (perpWallDist <= 9.00f) wallGlyph = '-';
             else if (perpWallDist <= 11.0f) wallGlyph = '.';
 
-            // Corruption Glyph Glitching
             if (corruptionLevel > 0.3f && wallGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
                 wallGlyph = "?!@#$%^&*"[rand() % 9];
             }
@@ -798,12 +802,15 @@ public:
         int cy = horizon;
         drawGlyph(cx, cy, '+', 0xFF94A3B8);
 
+        // Warning Box with Solid Background
         if (player.takingDamage) {
+            drawRectFilled(34, 27, 16, 3, 0xFF050505);
             drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
-        // Live HUD - Modifies based on Corruption
-        // Live HUD - Modifies based on Corruption
+        // Main HUD with Solid Background
+        drawRectFilled(1, 1, 52, 7, 0xFF050505);
+
         std::string elevStr;
         uint32_t elevColor;
         if (player.posZ > 0.7f) {
@@ -823,14 +830,13 @@ public:
             drawText(2, 4, "TEST MAZE UTILITY v1.0", TIER_LOW_BRIGHT);
             drawText(2, 6, "SYS: CLEAN", TIER_LOW_BRIGHT);
         } else {
-            // Unmasks health and sanity bars as corruption peaks
             uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
             drawText(2, 4, "SYS ERR: HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
 
             uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
             drawText(2, 6, "SYS ERR: SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
         }
-        
+
         if (currentDifficulty == DIFF_EASY) {
             renderSidebarMinimap();
         }
@@ -933,6 +939,8 @@ public:
     }
 
     void render() {
+        // This clears the entire screen to dark blue. 
+        // 3D walls DO NOT draw on Success or GameOver states, so text is never blocked!
         std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF080C14);
 
         if (currentState == STATE_TITLE) renderTitleScreen();
