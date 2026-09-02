@@ -224,6 +224,84 @@ private:
         float y = 12.5f;
         float speed = 1.8f;
         bool isChasing = false;
+        float animTimer = 0.0f;
+        int currentFrame = 0;
+
+        const std::vector<std::string> frame0 = {
+            "                                                                   ",
+            "                                                         .:-::....         .::.                                          ",
+            "                              ..::----===========+++====+++++++:                                         ",
+            "                            :-==++*##***+====. :=+*##%%%%######*#*+                                      ",
+            "                       .::-==+#@@@@@@@@@#+-     :%@@@@@@@@@@%%#####* .                                   ",
+            "                       -==+*%@@@@@@@@@@@@%-      =@@@@@@@@@@@@@@@%%**=.                                   ",
+            "                       -+*#@@@@@@@@@@@@@@#       -@@@@@@@@@@@@@@%#*++=:.                                  ",
+            "                        :=#@@@@@@@@@@@@#.       :#@@@@@@@@@@@@%*+-:.::-.                                 ",
+            "                           =#@@@@@@@@%+.        .+-:+%@@@@@*-.     ..:-                                  ",
+            "                              :======:           ==.  .              ..:                                 ",
+            "                                                 :+:                 .:-                                 ",
+            "                                                 .:.               ..--* .                               ",
+            "                                        ::.   :=*#+#+              .:-+*                                 ",
+            "                                       :=*#=:--+%@@%+             .:-+**=                                ",
+            "                                             :-#@%%#*=:           .:=+###                                ",
+            "                                                 :+*+:      ......:--+*%%%-                               ",
+            "                                        .-+-.   :**:   .:...::-::::=+#%%%#                               ",
+            "                                      -+%%==*#%%%@@%#*=---::--=----=*#%%%@                               ",
+            "                                   .=+@- :=+ :*:-###@@%***=:=======+*%@@%@                               ",
+            "                                  -*#-          :-=%@@@###*-++++=++*#%@@%*                               ",
+            "                         .       :%%  .:*@%%@%==%-=+ @@@*#%*++++++*#%@@@%                                ",
+            "                        .        #@@@@@@@@@@@@@@@@@@@@@#=%%%+++++*%@@@@%.                                ",
+            "                         ..     :@@@@@@@@@@@@@@@@@@@@@@%-#%%#+**#%@@@@@#                                 ",
+            "                         ..     +@@@@@@@@@@@@@@@@@@@@@@@-#%%%#*#%@@@@@@                                  ",
+            "                   .      .     *@@@@@@@@@@@@@@@@@@@@@@@:%@@%%#%%@@@@@                                   ",
+            "                     -    .     +@@@@@@%@@@@@@@@@@@@@@@@:@%@%%%%@%@%#                                    ",
+            "                          .     .@@@@%#@@@@@@@@@@@@@@@@+-@%%%%%@@%=                                      ",
+            "                                 @@@@@@@@@@@@@@@@@@@@@@ +@%%#=#@@                                        ",
+            "                                  @@@@@+*@@@@@@@@@@@@%: #%%%+=%@                                         ",
+            "                                  . =+*@@@@@@@@@@@% =  .%%#%=+%                                          ",
+            "                                         -*%*+.   +=*  *@%%%--                                           ",
+            "                                      : -+==+++++*%   *@%%@*                                             ",
+            "                                 .=:      .=*+-:    -%@%%                                                ",
+            "                                   :**=:        -+%@@+                                                   ",
+            "                                        .-+**##=                                                         "
+        };
+
+        const std::vector<std::string> frame1 = {
+            "                                                                   ",
+            "                                                         .::-::....         .::.                                          ",
+            "                              ..::----===========+++====+++++++:                                         ",
+            "                            :-==++*##***+====. :=+*##%%%%######*#*+                                      ",
+            "                       .::-==+#@@@@@@@@@#+-     :%@@@@@@@@@@%%#####* .                                   ",
+            "                       -==+*%@@@@@@@@@@@@%-      =@@@@@@@@@@@@@@@%%**=.                                   ",
+            "                       -+*#@@@@@@@@@@@@@@#       -@@@@@@@@@@@@@@%#*++=:.                                  ",
+            "                        :=#@@@@@@@@@@@@#.       :#@@@@@@@@@@@@%*+-:.::-.                                 ",
+            "                           =#@@@@@@@@%+.        .+-:+%@@@@@*-.     ..:-                                  ",
+            "                              :======:           ==.  .              ..:                                 ",
+            "                                                 :+:                 .:-                                 ",
+            "                                                 .:.               ..--* .                               ",
+            "                                        ::.   :=*#+#+              .:-+*                                 ",
+            "                                       :=*#=:--+%@@%+             .:-+**=                                ",
+            "                                             :-#@%%#*=:           .:=+###                                ",
+            "                                                 :+*+:      ......::-+*%%%-                               ",
+            "                                        .-+-.   :**:   .:...::-::::=+#%%%#                               ",
+            "                                      -+%%==*#%%%@@%#*=---::--=----=*#%%%@                               ",
+            "                                   .=+@- :=+ :*:-###@@%***=:=======+*%@@%@                               ",
+            "                                  -*#-          :-=%@@@###*-++++=++*#%@@%*                               ",
+            "                         .       :%%  .:*@%%@%==%-=+ @@@*#%*++++++*#%@@@%                                ",
+            "                        .        #@@@@@@@@@@@@@@@@@@@@@#=%%%+++++*%@@@@%.                                ",
+            "                         ..     :@@@@@@@@@@@@@@@@@@@@@@%-#%%#+**#%@@@@@#                                 ",
+            "                         ..     +@@@@@@@@@@@@@@@@@@@@@@@-#%%%#*#%@@@@@@                                  ",
+            "                   .      .     *@@@@@@@@@@@@@@@@@@@@@@@:%@@%%#%%@@@@@                                   ",
+            "                     -    .     +@@@@@@%@@@@@@@@@@@@@@@@:@%@%%%%@%@%#                                    ",
+            "                          .     .@@@@%#@@@@@@@@@@@@@@@@+-@%%%%%@@%=                                      ",
+            "                                 @@@@@@@@@@@@@@@@@@@@@@ +@%%#=#@@                                        ",
+            "                                  @@@@@+*@@@@@@@@@@@@%: #%%%+=%@                                         ",
+            "                                  . =+*@@@@@@@@@@@% =  .%%#%=+%                                          ",
+            "                                         -*%*+.   +=*  *@%%%--                                           ",
+            "                                      : -+==+++++*%   *@%%@*                                             ",
+            "                                 .=:      .=*+-:    -%@%%                                                ",
+            "                                   :**=:        -+%@@+                                                   ",
+            "                                        .-+**##=                                                         "
+        };
     } stalker;
 
     void updateWindowScale() {
@@ -620,6 +698,13 @@ public:
         if (corruptionLevel > 0.5f) {
             if (distToMonster < 8.5f) {
                 stalker.isChasing = true;
+                
+                stalker.animTimer += dtSec;
+                if (stalker.animTimer > 0.25f) {
+                    stalker.currentFrame = 1 - stalker.currentFrame;
+                    stalker.animTimer = 0.0f;
+                }
+
                 float dx = (player.posX - stalker.x) / distToMonster;
                 float dy = (player.posY - stalker.y) / distToMonster;
 
@@ -632,17 +717,17 @@ public:
                 }
 
                 player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
-                if (distToMonster < 1.1f) {
-                    player.health -= 28.0f * dtSec;
-                    player.takingDamage = true;
+                if (distToMonster < 0.75f) {
+                    deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
+                    currentState = STATE_GAMEOVER;
+                    setCaptureMouse(false);
+                    SDL_LockAudioDevice(audioDevice);
+                    audioState.inGame = false;
+                    SDL_UnlockAudioDevice(audioDevice);
+                    return;
                 }
             } else {
                 stalker.isChasing = false;
-                player.sanity -= 0.08f * dtSec;
-                if (distToMonster > 12.0f) {
-                    player.sanity = std::min(100.0f, player.sanity + 1.0f * dtSec);
-                    player.health = std::min(100.0f, player.health + 0.8f * dtSec);
-                }
             }
         } else {
             player.sanity = 100.0f;
@@ -685,6 +770,52 @@ public:
         audioState.monsterDist = distToMonster;
         audioState.isChasing = stalker.isChasing;
         SDL_UnlockAudioDevice(audioDevice);
+    }
+
+    void renderStalkerSprite() {
+        float spriteX = stalker.x - player.posX;
+        float spriteY = stalker.y - player.posY;
+
+        float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+        float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+        float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+        if (transformY <= 0.2f) return;
+
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+        int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
+
+        int spriteHeight = std::abs(int(ROWS / transformY));
+        int drawStartY = -spriteHeight / 2 + ROWS / 2 + int(player.pitch);
+        int drawEndY = spriteHeight / 2 + ROWS / 2 + int(player.pitch);
+
+        int spriteWidth = std::abs(int(ROWS / transformY * 1.5f));
+        int drawStartX = -spriteWidth / 2 + screenX;
+        int drawEndX = spriteWidth / 2 + screenX;
+
+        const auto& currentSprite = (stalker.currentFrame == 0) ? stalker.frame0 : stalker.frame1;
+        int rowCount = currentSprite.size();
+        int colCount = currentSprite[0].size();
+
+        for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
+            if (stripe < 0 || stripe >= viewWidth) continue;
+
+            int texX = int((stripe - drawStartX) * colCount / spriteWidth);
+            if (texX < 0 || texX >= colCount) continue;
+
+            for (int y = drawStartY; y < drawEndY; ++y) {
+                if (y < 0 || y >= ROWS) continue;
+
+                int texY = int((y - drawStartY) * rowCount / (drawEndY - drawStartY));
+                if (texY < 0 || texY >= rowCount) continue;
+
+                char glyph = currentSprite[texY][texX];
+                if (glyph != ' ' && glyph != '.') {
+                    uint32_t color = (transformY < 3.0f) ? CORRUPT_BRIGHT : TIER_HIGH_BRIGHT;
+                    drawGlyph(stripe, y, glyph, color);
+                }
+            }
+        }
     }
 
     void render3DView() {
@@ -745,7 +876,6 @@ public:
                 vOffset = (rand() % 5) - 2; 
             }
 
-            // 1. Raycasted Textured Floor & Checkerboard
             for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
                 float straightDist = (ROWS * totalPlayerZ) / p;
@@ -841,6 +971,11 @@ public:
                     }
                 }
             }
+        }
+
+        // Render the 3D Animated Monster Sprite before the HUD
+        if (corruptionLevel > 0.5f) {
+            renderStalkerSprite();
         }
 
         int cx = viewWidth / 2;
