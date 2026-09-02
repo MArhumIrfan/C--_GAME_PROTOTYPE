@@ -45,11 +45,13 @@ constexpr uint32_t CRT_DARK_BRIGHT  = 0xFF15803D; // Dark green (N-S walls up cl
 constexpr uint32_t CRT_DARK_MID     = 0xFF166534; // Dark green (N-S mid)
 constexpr uint32_t CRT_DARK_DIM     = 0xFF14532D; // Dark green (N-S far)
 
-constexpr uint32_t CRT_STAIR_COLOR  = 0xFF38BDF8; // Cyan indicator for stairs
+// Distinct colors for elevation & steps
+constexpr uint32_t CRT_STAIR_BRIGHT = 0xFF38BDF8; // Cyan stair treads
+constexpr uint32_t CRT_STAIR_DARK   = 0xFF0284C7; // Dim cyan
+constexpr uint32_t CRT_LEDGE_COLOR  = 0xFFF59E0B; // Amber warning for drop-off ledges
 constexpr uint32_t RED_GOAL_BRIGHT  = 0xFFF43F5E;
 constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
 
-// Audio Configuration
 constexpr int AUDIO_SAMPLE_RATE = 44100;
 constexpr int AUDIO_BUFFER_SIZE = 1024;
 
@@ -102,12 +104,11 @@ const uint8_t FONT_8X8[96][8] = {
 
 struct Point { int x, y; };
 
-// 3D Grid Cell Definition
 struct MapCell {
-    int wallType = 0;      // 0 = Walkable air, 1 = Solid Wall, 2 = Goal
-    float floorH = 0.0f;   // 0.0 = Ground, 1.0 = Elevated Bridge
-    float ceilH = 2.0f;    // Ceiling clearance
-    bool isStairs = false; // Step up/down corridor
+    int wallType = 0;      // 0 = Air, 1 = Wall, 2 = Goal
+    float floorH = 0.0f;   // 0.0 = Ground, 0.5 = Stairs, 1.0 = Overpass
+    float ceilH = 2.0f;
+    bool isStairs = false;
 };
 
 struct AudioState {
@@ -141,11 +142,9 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
 
         float beatEnv = 0.0f;
         float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
-        if (cyclePos < 0.15f) {
-            beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
-        } else if (cyclePos > 0.22f && cyclePos < 0.35f) {
-            beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
-        }
+        if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
+        else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
+
         float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f);
 
         float monsterAudio = 0.0f;
@@ -190,21 +189,20 @@ private:
     struct Player {
         float posX = 1.5f;
         float posY = 1.5f;
-        float posZ = 0.0f;        // 3D vertical elevation (0.0 to 1.0)
-        float targetPosZ = 0.0f;  // Smooth stair stepping
+        float posZ = 0.0f;
+        float targetPosZ = 0.0f;
         float eyeHeight = 0.5f;
-        float pitch = 0.0f;       // Vertical look pitch offset in screen rows
+        float pitch = 0.0f;
 
         float dirX = 1.0f;
         float dirY = 0.0f;
         float planeX = 0.0f;
         float planeY = 0.66f;
         float moveSpeed = 3.2f;
-        float rotSpeed = 2.6f;
+        float mouseSensitivity = 0.0022f;
 
-        int forward = 0;
-        int rotate = 0;
-        int pitchDir = 0;
+        int forward = 0; // W/S (+1 / -1)
+        int strafe = 0;  // A/D (-1 / +1)
         float stepAccumulator = 0.0f;
         
         float sanity = 100.0f;
@@ -228,8 +226,11 @@ private:
         }
     }
 
+    void setCaptureMouse(bool capture) {
+        SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
+    }
+
     void generateMazeWithOverpass() {
-        // 1. Initialize with solid walls
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
                 worldMap[r][c].wallType = 1;
@@ -239,7 +240,6 @@ private:
             }
         }
 
-        // 2. Standard DFS Maze generation
         std::stack<Point> stack;
         startPos = { 1, 1 };
         worldMap[startPos.y][startPos.x].wallType = 0;
@@ -270,28 +270,23 @@ private:
             }
         }
 
-        // 3. Carve Central Elevated Overpass Platform
         int midX = MAP_W / 2;
         int midY = MAP_H / 2;
 
-        // Elevated walkway (Height = 1.0, Ceiling = 3.0)
         for (int x = midX - 3; x <= midX + 3; ++x) {
             worldMap[midY][x].wallType = 0;
             worldMap[midY][x].floorH = 1.0f;
             worldMap[midY][x].ceilH = 3.0f;
         }
 
-        // Left Staircase: leads from ground (0.0) up to overpass (1.0)
         worldMap[midY][midX - 4].wallType = 0;
         worldMap[midY][midX - 4].floorH = 0.5f;
         worldMap[midY][midX - 4].isStairs = true;
 
-        // Right Staircase: leads from overpass (1.0) back to ground (0.0)
         worldMap[midY][midX + 4].wallType = 0;
         worldMap[midY][midX + 4].floorH = 0.5f;
         worldMap[midY][midX + 4].isStairs = true;
 
-        // 4. Set Goal
         endPos = { MAP_W - 2, MAP_H - 2 };
         worldMap[endPos.y][endPos.x].wallType = 2;
 
@@ -319,6 +314,7 @@ private:
         player.health = 100.0f;
         generateMazeWithOverpass();
         currentState = STATE_PLAYING;
+        setCaptureMouse(true);
 
         SDL_LockAudioDevice(audioDevice);
         audioState.inGame = true;
@@ -333,6 +329,7 @@ private:
         player.health = std::min(100.0f, player.health + 30.0f);
         generateMazeWithOverpass();
         currentState = STATE_PLAYING;
+        setCaptureMouse(true);
 
         SDL_LockAudioDevice(audioDevice);
         audioState.inGame = true;
@@ -407,6 +404,24 @@ public:
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) isRunning = false;
 
+            // 1. Mouse Motion for Smooth Looking
+            if (currentState == STATE_PLAYING && event.type == SDL_MOUSEMOTION) {
+                float rotAngle = event.motion.xrel * player.mouseSensitivity;
+
+                // Horizontal Yaw
+                float oldDirX = player.dirX;
+                player.dirX = player.dirX * cos(rotAngle) - player.dirY * sin(rotAngle);
+                player.dirY = oldDirX * sin(rotAngle) + player.dirY * cos(rotAngle);
+
+                float oldPlaneX = player.planeX;
+                player.planeX = player.planeX * cos(rotAngle) - player.planeY * sin(rotAngle);
+                player.planeY = oldPlaneX * sin(rotAngle) + player.planeY * cos(rotAngle);
+
+                // Vertical Pitch
+                player.pitch -= event.motion.yrel * 0.12f;
+                player.pitch = std::clamp(player.pitch, -22.0f, 22.0f);
+            }
+
             if (event.type == SDL_KEYDOWN) {
                 if (currentState == STATE_TITLE) {
                     if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) {
@@ -436,32 +451,37 @@ public:
                 }
                 else if (currentState == STATE_SUCCESS) {
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) nextLevel();
-                    if (event.key.keysym.sym == SDLK_ESCAPE) currentState = STATE_TITLE;
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_TITLE;
+                        setCaptureMouse(false);
+                    }
                 }
                 else if (currentState == STATE_GAMEOVER) {
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) startNewGame();
-                    if (event.key.keysym.sym == SDLK_ESCAPE) currentState = STATE_TITLE;
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_TITLE;
+                        setCaptureMouse(false);
+                    }
                 }
                 else if (currentState == STATE_PLAYING) {
-                    if (event.key.keysym.sym == SDLK_ESCAPE) currentState = STATE_TITLE;
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_TITLE;
+                        setCaptureMouse(false);
+                    }
                 }
             }
         }
 
+        // 2. Keyboard Polling for WASD Movement & Strafe
         if (currentState == STATE_PLAYING) {
             const uint8_t* state = SDL_GetKeyboardState(NULL);
             player.forward = 0;
-            player.rotate = 0;
-            player.pitchDir = 0;
+            player.strafe = 0;
 
             if (state[SDL_SCANCODE_W]) player.forward += 1;
             if (state[SDL_SCANCODE_S]) player.forward -= 1;
-            if (state[SDL_SCANCODE_A]) player.rotate -= 1;
-            if (state[SDL_SCANCODE_D]) player.rotate += 1;
-
-            // Pitch Look (Look up / down with Arrow Keys)
-            if (state[SDL_SCANCODE_UP])   player.pitchDir += 1;
-            if (state[SDL_SCANCODE_DOWN]) player.pitchDir -= 1;
+            if (state[SDL_SCANCODE_A]) player.strafe -= 1; // Strafe left
+            if (state[SDL_SCANCODE_D]) player.strafe += 1; // Strafe right
         }
     }
 
@@ -472,46 +492,34 @@ public:
         levelTime += dtSec;
         player.takingDamage = false;
 
-        // 1. Rotation & Pitch Look
-        if (player.rotate != 0) {
-            float rot = player.rotate * player.rotSpeed * dtSec;
-            float oldDirX = player.dirX;
-            player.dirX = player.dirX * cos(rot) - player.dirY * sin(rot);
-            player.dirY = oldDirX * sin(rot) + player.dirY * cos(rot);
+        // 1. WASD Vector Movement (Forward + Strafe)
+        if (player.forward != 0 || player.strafe != 0) {
+            float forwardStep = player.forward * player.moveSpeed * dtSec;
+            float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec; // Slightly slower strafe
 
-            float oldPlaneX = player.planeX;
-            player.planeX = player.planeX * cos(rot) - player.planeY * sin(rot);
-            player.planeY = oldPlaneX * sin(rot) + player.planeY * cos(rot);
-        }
+            // Strafe vector is perpendicular to dir vector: (dirY, -dirX)
+            float moveX = player.dirX * forwardStep + player.dirY * strafeStep;
+            float moveY = player.dirY * forwardStep - player.dirX * strafeStep;
 
-        if (player.pitchDir != 0) {
-            player.pitch += player.pitchDir * 40.0f * dtSec;
-            player.pitch = std::clamp(player.pitch, -18.0f, 18.0f);
-        } else {
-            // Smoothly auto-center pitch when released
-            player.pitch += (0.0f - player.pitch) * 0.1f;
-        }
-
-        // 2. Movement & Height Step Collision
-        if (player.forward != 0) {
-            float step = player.forward * player.moveSpeed * dtSec;
-            float buf = (step > 0) ? 0.35f : -0.35f;
+            float bufX = (moveX > 0) ? 0.32f : -0.32f;
+            float bufY = (moveY > 0) ? 0.32f : -0.32f;
 
             float prevX = player.posX;
             float prevY = player.posY;
 
-            int nextTileX = int(player.posX + player.dirX * (step + buf));
-            int nextTileY = int(player.posY + player.dirY * (step + buf));
+            int nextTileX = int(player.posX + moveX + bufX);
+            int nextTileY = int(player.posY + moveY + bufY);
 
-            // Check if walkable AND if step height difference is climbable (<= 0.6 units)
+            // Move along X with step-height tolerance
             if (worldMap[int(player.posY)][nextTileX].wallType != 1) {
                 float hDiff = std::abs(worldMap[int(player.posY)][nextTileX].floorH - player.posZ);
-                if (hDiff <= 0.6f) player.posX += player.dirX * step;
+                if (hDiff <= 0.65f) player.posX += moveX;
             }
 
+            // Move along Y with step-height tolerance
             if (worldMap[nextTileY][int(player.posX)].wallType != 1) {
                 float hDiff = std::abs(worldMap[nextTileY][int(player.posX)].floorH - player.posZ);
-                if (hDiff <= 0.6f) player.posY += player.dirY * step;
+                if (hDiff <= 0.65f) player.posY += moveY;
             }
 
             player.stepAccumulator += std::hypot(player.posX - prevX, player.posY - prevY);
@@ -521,13 +529,13 @@ public:
             }
         }
 
-        // 3. Smooth Stair-Stepping / Vertical Interpolation
+        // 2. Vertical Stair Step Interpolation
         int currTileX = int(player.posX);
         int currTileY = int(player.posY);
         player.targetPosZ = worldMap[currTileY][currTileX].floorH;
-        player.posZ += (player.targetPosZ - player.posZ) * 0.2f;
+        player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
-        // 4. Stalker AI
+        // 3. Stalker AI
         float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
 
         if (distToMonster < 8.5f) {
@@ -563,6 +571,7 @@ public:
         if (player.sanity <= 0.0f) {
             deathReason = "LOST TO THE TERROR (SANITY DEPLETED)";
             currentState = STATE_GAMEOVER;
+            setCaptureMouse(false);
             SDL_LockAudioDevice(audioDevice);
             audioState.inGame = false;
             SDL_UnlockAudioDevice(audioDevice);
@@ -572,6 +581,7 @@ public:
         if (player.health <= 0.0f) {
             deathReason = "SLAIN BY THE STALKER (HEALTH DEPLETED)";
             currentState = STATE_GAMEOVER;
+            setCaptureMouse(false);
             SDL_LockAudioDevice(audioDevice);
             audioState.inGame = false;
             SDL_UnlockAudioDevice(audioDevice);
@@ -580,6 +590,7 @@ public:
 
         if (currTileX == endPos.x && currTileY == endPos.y) {
             currentState = STATE_SUCCESS;
+            setCaptureMouse(false);
             SDL_LockAudioDevice(audioDevice);
             audioState.inGame = false;
             SDL_UnlockAudioDevice(audioDevice);
@@ -593,10 +604,11 @@ public:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    // --- MULTI-HEIGHT 3D ASCII RENDERER ---
+    // --- STEP RISER & ELEVATION RAYCASTER ---
     void render3DView() {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         float totalPlayerZ = player.posZ + player.eyeHeight;
+        int horizon = int(ROWS / 2 + player.pitch);
 
         for (int col = 0; col < viewWidth; ++col) {
             float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
@@ -616,12 +628,29 @@ public:
             if (rayDirY < 0) { stepY = -1; sideDistY = (player.posY - mapY) * deltaDistY; }
             else             { stepY =  1; sideDistY = (mapY + 1.0f - player.posY) * deltaDistY; }
 
+            float prevFloorH = worldMap[mapY][mapX].floorH;
+            float stepRiserDist = -1.0f;
+            float stepFloorDiff = 0.0f;
+            bool hitStepRiser = false;
+            bool stepIsStair = false;
+
             while (hit == 0) {
                 if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
                 else                       { sideDistY += deltaDistY; mapY += stepY; side = 1; }
 
                 if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
+                    float currCellFloor = worldMap[mapY][mapX].floorH;
+                    if (!hitStepRiser && worldMap[mapY][mapX].wallType == 0 && std::abs(currCellFloor - prevFloorH) > 0.1f) {
+                        hitStepRiser = true;
+                        stepFloorDiff = currCellFloor - prevFloorH;
+                        stepRiserDist = (side == 0) ? (sideDistX - deltaDistX) : (sideDistY - deltaDistY);
+                        stepIsStair = worldMap[mapY][mapX].isStairs;
+                    }
+                    prevFloorH = currCellFloor;
+
                     if (worldMap[mapY][mapX].wallType > 0) hit = worldMap[mapY][mapX].wallType;
+                } else {
+                    break;
                 }
             }
 
@@ -629,16 +658,24 @@ public:
             else           perpWallDist = (sideDistY - deltaDistY);
             if (perpWallDist < 0.05f) perpWallDist = 0.05f;
 
-            // Height-offset Projection calculation
-            float wallFloorH = worldMap[mapY][mapX].floorH;
-            float wallCeilH  = worldMap[mapY][mapX].ceilH;
+            // 1. Draw Textured Floor
+            for (int r = horizon; r < ROWS; ++r) {
+                float p = r - horizon;
+                if (p > 0) {
+                    float rowDist = (ROWS * totalPlayerZ) / p;
+                    if (rowDist < 8.0f && (int(rowDist * 4.0f) % 2 == 0) && (col % 3 == 0)) {
+                        drawGlyph(col, r, '.', 0xFF14532D);
+                    }
+                }
+            }
 
-            // Horizon line adjusted by look pitch and player vertical Z offset
-            int horizon = int(ROWS / 2 + player.pitch);
+            // 2. Draw Solid Walls
+            float wallFloorH = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].floorH : 0.0f;
+            float wallCeilH  = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].ceilH : 2.0f;
+
             int drawStart = horizon - int(((wallCeilH - totalPlayerZ) * ROWS) / perpWallDist);
             int drawEnd   = horizon - int(((wallFloorH - totalPlayerZ) * ROWS) / perpWallDist);
 
-            // ASCII Density Bands
             char wallGlyph = ' ';
             if (perpWallDist <= 1.25f)      wallGlyph = '@';
             else if (perpWallDist <= 2.50f) wallGlyph = '#';
@@ -648,7 +685,6 @@ public:
             else if (perpWallDist <= 9.00f) wallGlyph = '-';
             else if (perpWallDist <= 11.0f) wallGlyph = '.';
 
-            // Dual-tone Orientation Shading
             uint32_t wallColor;
             if (hit == 2) {
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
@@ -664,20 +700,49 @@ public:
                 }
             }
 
-            // Draw Wall Column
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
                     drawGlyph(col, r, wallGlyph, wallColor);
                 }
             }
+
+            // 3. Render Elevation Risers (Stairs & Ledges)
+            if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist) {
+                float lowH = std::min(prevFloorH, prevFloorH + stepFloorDiff);
+                float highH = std::max(prevFloorH, prevFloorH + stepFloorDiff);
+
+                int stepTop = horizon - int(((highH - totalPlayerZ) * ROWS) / stepRiserDist);
+                int stepBottom = horizon - int(((lowH - totalPlayerZ) * ROWS) / stepRiserDist);
+
+                char stepGlyph = '=';
+                uint32_t stepColor = CRT_STAIR_BRIGHT;
+
+                if (stepIsStair) {
+                    stepGlyph = (int(stepRiserDist * 4) % 2 == 0) ? '=' : '_';
+                    stepColor = (stepRiserDist < 3.0f) ? CRT_STAIR_BRIGHT : CRT_STAIR_DARK;
+                } else {
+                    stepGlyph = (stepFloorDiff > 0) ? '^' : 'v';
+                    stepColor = CRT_LEDGE_COLOR;
+                }
+
+                for (int r = stepTop; r <= stepBottom; ++r) {
+                    if (r >= 0 && r < ROWS) {
+                        drawGlyph(col, r, stepGlyph, stepColor);
+                    }
+                }
+            }
         }
 
-        // Damage Flashing HUD Warning
+        // Center Crosshair
+        int cx = viewWidth / 2;
+        int cy = horizon;
+        drawGlyph(cx, cy, '+', 0xFF94A3B8);
+
         if (player.takingDamage) {
             drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
-        // Live HUD (Now with Elevation indicator)
+        // Live HUD
         std::string elevStr = (player.posZ > 0.7f) ? "OVERPASS [HIGH]" : ((player.posZ > 0.2f) ? "STAIRS [MID]" : "GROUND [LOW]");
         drawText(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), CRT_LIGHT_MID);
         
@@ -710,10 +775,10 @@ public:
                     mapCol = 0xFF475569;
                 } else if (worldMap[r][c].isStairs) {
                     mapCh = '=';
-                    mapCol = CRT_STAIR_COLOR; // Stairs marked with blue '='
+                    mapCol = CRT_STAIR_BRIGHT;
                 } else if (worldMap[r][c].floorH > 0.7f) {
                     mapCh = '^';
-                    mapCol = CRT_LIGHT_BRIGHT; // High bridge marked with '^'
+                    mapCol = CRT_LIGHT_BRIGHT;
                 } else if (r == startPos.y && c == startPos.x) {
                     mapCh = 'S';
                     mapCol = CRT_LIGHT_BRIGHT;
@@ -729,9 +794,9 @@ public:
         drawGlyph(miniStartX + int(player.posX), miniStartY + int(player.posY), 'O', 0xFF38BDF8);
 
         drawText(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
-        drawText(72, 34, "[=] Stairs  [^] Bridge", CRT_STAIR_COLOR);
-        drawText(72, 36, "[S] Start   [E] End", 0xFF64748B);
-        drawText(72, 38, "[O] Player Position", 0xFF64748B);
+        drawText(72, 34, "[=] Stairs (Climbable)", CRT_STAIR_BRIGHT);
+        drawText(72, 36, "[^] Overpass Platform", CRT_LIGHT_BRIGHT);
+        drawText(72, 38, "[S] Start  [E] End", 0xFF64748B);
     }
 
     void renderTitleScreen() {
@@ -790,15 +855,10 @@ public:
     void render() {
         std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF080C14);
 
-        if (currentState == STATE_TITLE) {
-            renderTitleScreen();
-        } else if (currentState == STATE_PLAYING) {
-            render3DView();
-        } else if (currentState == STATE_SUCCESS) {
-            renderSuccessScreen();
-        } else if (currentState == STATE_GAMEOVER) {
-            renderGameOverScreen();
-        }
+        if (currentState == STATE_TITLE) renderTitleScreen();
+        else if (currentState == STATE_PLAYING) render3DView();
+        else if (currentState == STATE_SUCCESS) renderSuccessScreen();
+        else if (currentState == STATE_GAMEOVER) renderGameOverScreen();
 
         SDL_UpdateTexture(screenTexture, nullptr, pixelBuffer.data(), NATIVE_WIDTH * sizeof(uint32_t));
         SDL_RenderClear(renderer);
@@ -828,6 +888,7 @@ public:
     }
 
     void cleanup() {
+        setCaptureMouse(false);
         if (audioDevice != 0) SDL_CloseAudioDevice(audioDevice);
         if (screenTexture) SDL_DestroyTexture(screenTexture);
         if (renderer) SDL_DestroyRenderer(renderer);
