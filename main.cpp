@@ -516,8 +516,8 @@ public:
             float forwardStep = player.forward * player.moveSpeed * dtSec;
             float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec;
 
-            float moveX = player.dirX * forwardStep + player.dirY * strafeStep;
-            float moveY = player.dirY * forwardStep - player.dirX * strafeStep;
+            float moveX = player.dirX * forwardStep - player.dirY * strafeStep;
+            float moveY = player.dirY * forwardStep + player.dirX * strafeStep;
 
             float bufX = (moveX > 0) ? 0.32f : -0.32f;
             float bufY = (moveY > 0) ? 0.32f : -0.32f;
