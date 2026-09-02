@@ -62,6 +62,8 @@ constexpr int AUDIO_BUFFER_SIZE = 1024;
 enum GameState {
     STATE_TITLE,
     STATE_PLAYING,
+    STATE_PAUSED,
+    STATE_JUMPSCARE,
     STATE_SUCCESS,
     STATE_GAMEOVER
 };
@@ -118,10 +120,12 @@ struct AudioState {
     float ambientPhase = 0.0f;
     float heartbeatPhase = 0.0f;
     float monsterPhase = 0.0f;
+    float screamPhase = 0.0f;
     float sanity = 100.0f;
     float monsterDist = 20.0f;
     float corruption = 0.0f;
     bool isChasing = false;
+    bool isJumpscare = false;
     bool inGame = false;
 };
 
@@ -131,8 +135,21 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
     int samples = len / sizeof(int16_t);
 
     for (int i = 0; i < samples; ++i) {
-        if (!audio->inGame) {
+        if (!audio->inGame && !audio->isJumpscare) {
             buffer[i] = 0;
+            continue;
+        }
+
+        if (audio->isJumpscare) {
+            // Demonic piercing shriek mixed with white noise static
+            audio->screamPhase += (350.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
+            
+            float screech = std::sin(audio->screamPhase) * 0.5f;
+            float rawNoise = ((rand() % 2000) / 1000.0f - 1.0f) * 0.7f;
+            float demonicRumble = std::sin(audio->screamPhase * 0.1f) * 0.4f;
+
+            buffer[i] = static_cast<int16_t>(std::clamp(screech + rawNoise + demonicRumble, -1.0f, 1.0f) * 32767.0f);
             continue;
         }
 
@@ -194,6 +211,7 @@ private:
     float levelTime = 0.0f;
     float corruptionLevel = 0.0f; 
     std::string deathReason = "";
+    float jumpscareTimer = 0.0f;
 
     struct Player {
         float posX = 1.5f;
@@ -457,6 +475,7 @@ private:
 
         SDL_LockAudioDevice(audioDevice);
         audioState.inGame = true;
+        audioState.isJumpscare = false;
         audioState.sanity = 100.0f;
         audioState.monsterDist = 20.0f;
         audioState.corruption = corruptionLevel;
@@ -476,6 +495,7 @@ private:
 
         SDL_LockAudioDevice(audioDevice);
         audioState.inGame = true;
+        audioState.isJumpscare = false;
         audioState.corruption = corruptionLevel;
         SDL_UnlockAudioDevice(audioDevice);
     }
@@ -609,6 +629,36 @@ public:
                         }
                     }
                 }
+                else if (currentState == STATE_PLAYING) {
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        currentState = STATE_PAUSED;
+                        setCaptureMouse(false);
+                        SDL_LockAudioDevice(audioDevice);
+                        audioState.inGame = false;
+                        SDL_UnlockAudioDevice(audioDevice);
+                    }
+                    else if (event.key.keysym.sym == SDLK_F1) {
+                        nextLevel();
+                    }
+                    else if (event.key.keysym.sym >= SDLK_1 && event.key.keysym.sym <= SDLK_9) {
+                        int num = event.key.keysym.sym - SDLK_1 + 1;
+                        currentLevel = num;
+                        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.11f);
+                        generateProceduralMultiLevelMaze();
+                    }
+                }
+                else if (currentState == STATE_PAUSED) {
+                    if (event.key.keysym.sym == SDLK_ESCAPE || event.key.keysym.sym == SDLK_r) {
+                        currentState = STATE_PLAYING;
+                        setCaptureMouse(true);
+                        SDL_LockAudioDevice(audioDevice);
+                        audioState.inGame = true;
+                        SDL_UnlockAudioDevice(audioDevice);
+                    }
+                    else if (event.key.keysym.sym == SDLK_q) {
+                        currentState = STATE_TITLE;
+                    }
+                }
                 else if (currentState == STATE_SUCCESS) {
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) nextLevel();
                     if (event.key.keysym.sym == SDLK_ESCAPE) {
@@ -618,12 +668,6 @@ public:
                 }
                 else if (currentState == STATE_GAMEOVER) {
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) startNewGame();
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        currentState = STATE_TITLE;
-                        setCaptureMouse(false);
-                    }
-                }
-                else if (currentState == STATE_PLAYING) {
                     if (event.key.keysym.sym == SDLK_ESCAPE) {
                         currentState = STATE_TITLE;
                         setCaptureMouse(false);
@@ -645,6 +689,17 @@ public:
     }
 
     void update(double dt) {
+        if (currentState == STATE_JUMPSCARE) {
+            jumpscareTimer -= static_cast<float>(dt);
+            if (jumpscareTimer <= 0.0f) {
+                currentState = STATE_GAMEOVER;
+                SDL_LockAudioDevice(audioDevice);
+                audioState.isJumpscare = false;
+                SDL_UnlockAudioDevice(audioDevice);
+            }
+            return;
+        }
+
         if (currentState != STATE_PLAYING) return;
 
         float dtSec = static_cast<float>(dt);
@@ -719,10 +774,13 @@ public:
                 player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
                 if (distToMonster < 0.75f) {
                     deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
-                    currentState = STATE_GAMEOVER;
+                    currentState = STATE_JUMPSCARE;
+                    jumpscareTimer = 2.5f; // Jumpscare lasts 2.5 seconds
                     setCaptureMouse(false);
+                    
                     SDL_LockAudioDevice(audioDevice);
                     audioState.inGame = false;
+                    audioState.isJumpscare = true;
                     SDL_UnlockAudioDevice(audioDevice);
                     return;
                 }
@@ -815,6 +873,40 @@ public:
                     drawGlyph(stripe, y, glyph, color);
                 }
             }
+        }
+    }
+
+    void renderJumpscareScreen() {
+        // Flash full screen monster art and creepy text
+        const auto& currentSprite = stalker.frame0;
+        int rowCount = currentSprite.size();
+        int colCount = currentSprite[0].size();
+
+        // Render monster scaled to fill screen center
+        for (int y = 0; y < ROWS; ++y) {
+            for (int x = 10; x < TOTAL_COLS - 10; ++x) {
+                int texX = (x - 10) * colCount / (TOTAL_COLS - 20);
+                int texY = y * rowCount / ROWS;
+                if (texX >= 0 && texX < colCount && texY >= 0 && texY < rowCount) {
+                    char glyph = currentSprite[texY][texX];
+                    if (glyph != ' ' && glyph != '.') {
+                        uint32_t flashCol = ((rand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
+                        drawGlyph(x, y, glyph, flashCol);
+                    }
+                }
+            }
+        }
+
+        // Random flashing creepy corrupted text around the screen
+        std::vector<std::string> creepyPhrases = {
+            "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
+        };
+        
+        for (int i = 0; i < 4; ++i) {
+            int rx = rand() % 60 + 5;
+            int ry = rand() % 50 + 5;
+            std::string phrase = creepyPhrases[rand() % creepyPhrases.size()];
+            drawText(rx, ry, phrase, RED_GOAL_BRIGHT);
         }
     }
 
@@ -973,7 +1065,6 @@ public:
             }
         }
 
-        // Render the 3D Animated Monster Sprite before the HUD
         if (corruptionLevel > 0.5f) {
             renderStalkerSprite();
         }
@@ -1083,6 +1174,17 @@ public:
         drawText(26, 44, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
     }
 
+    void renderPauseScreen() {
+        drawRectFilled(30, 18, 40, 24, 0xEE050505);
+        drawText(38, 22, "========================", TIER_MID_BRIGHT);
+        drawText(38, 24, "      GAME PAUSED       ", TIER_MID_BRIGHT);
+        drawText(38, 26, "========================", TIER_MID_BRIGHT);
+
+        drawText(35, 32, "[R / ESC] RESUME GAME", TIER_HIGH_BRIGHT);
+        drawText(35, 36, "[Q] QUIT TO TITLE", RED_GOAL_BRIGHT);
+        drawText(34, 40, "DEV: [F1] SKIP LVL | [1-9] SET LVL", 0xFF64748B);
+    }
+
     void renderSuccessScreen() {
         drawText(36, 12, "****************************", TIER_HIGH_BRIGHT);
         drawText(36, 14, "      MAZE COMPLETED!       ", TIER_HIGH_BRIGHT);
@@ -1121,6 +1223,13 @@ public:
 
         if (currentState == STATE_TITLE) renderTitleScreen();
         else if (currentState == STATE_PLAYING) render3DView();
+        else if (currentState == STATE_PAUSED) {
+            render3DView();
+            renderPauseScreen();
+        }
+        else if (currentState == STATE_JUMPSCARE) {
+            renderJumpscareScreen();
+        }
         else if (currentState == STATE_SUCCESS) renderSuccessScreen();
         else if (currentState == STATE_GAMEOVER) renderGameOverScreen();
 
