@@ -9,11 +9,11 @@
 #include <ctime>
 #include <stack>
 
-// Shrink font character dimensions from 8x8 to 6x6 for higher resolution detail
+// Fine ASCII character dimensions for the 3D game viewport
 constexpr int CHAR_W = 6;
 constexpr int CHAR_H = 6;
-constexpr int TOTAL_COLS = 133; // Scales up columns to maintain aspect ratio
-constexpr int ROWS = 80;         // Scales up rows for finer vertical detail
+constexpr int TOTAL_COLS = 133; 
+constexpr int ROWS = 80;         
 constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;  
 constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;       
 
@@ -500,7 +500,36 @@ private:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    void drawGlyph(int col, int row, char c, uint32_t fgColor) {
+    // Standard character drawing function using 8x8 font metrics for UI & Menus
+    void drawGlyphStandard(int col, int row, char c, uint32_t fgColor) {
+        if (c < 32 || c > 127) return;
+        const uint8_t* glyph = FONT_8X8[c - 32];
+        int startX = col * 8;
+        int startY = row * 8;
+
+        for (int y = 0; y < 8; ++y) {
+            int drawY = startY + y;
+            if (drawY < 0 || drawY >= NATIVE_HEIGHT) continue; 
+            for (int x = 0; x < 8; ++x) {
+                int drawX = startX + x;
+                if (drawX < 0 || drawX >= NATIVE_WIDTH) continue; 
+                if ((glyph[y] >> (7 - x)) & 1) {
+                    pixelBuffer[drawY * NATIVE_WIDTH + drawX] = fgColor;
+                }
+            }
+        }
+    }
+
+    void drawTextStandard(int col, int row, const std::string& text, uint32_t color) {
+        for (size_t i = 0; i < text.size(); ++i) {
+            if (col + i < TOTAL_COLS) {
+                drawGlyphStandard(col + i, row, text[i], color);
+            }
+        }
+    }
+
+    // Fine character drawing function using 6x6 font metrics specifically for the 3D game viewport
+    void drawGlyphFine(int col, int row, char c, uint32_t fgColor) {
         if (c < 32 || c > 127) return;
         const uint8_t* glyph = FONT_8X8[c - 32];
         int startX = col * CHAR_W;
@@ -512,17 +541,20 @@ private:
             for (int x = 0; x < CHAR_W; ++x) {
                 int drawX = startX + x;
                 if (drawX < 0 || drawX >= NATIVE_WIDTH) continue; 
-                if ((glyph[y] >> (7 - x)) & 1) {
+                
+                int srcX = (x * 8) / CHAR_W;
+                int srcY = (y * 8) / CHAR_H;
+                if ((glyph[srcY] >> (7 - srcX)) & 1) {
                     pixelBuffer[drawY * NATIVE_WIDTH + drawX] = fgColor;
                 }
             }
         }
     }
 
-    void drawText(int col, int row, const std::string& text, uint32_t color) {
+    void drawTextFine(int col, int row, const std::string& text, uint32_t color) {
         for (size_t i = 0; i < text.size(); ++i) {
             if (col + i < TOTAL_COLS) {
-                drawGlyph(col + i, row, text[i], color);
+                drawGlyphFine(col + i, row, text[i], color);
             }
         }
     }
@@ -870,14 +902,13 @@ public:
                 char glyph = currentSprite[texY][texX];
                 if (glyph != ' ' && glyph != '.') {
                     uint32_t color = (transformY < 3.0f) ? CORRUPT_BRIGHT : TIER_HIGH_BRIGHT;
-                    drawGlyph(stripe, y, glyph, color);
+                    drawGlyphFine(stripe, y, glyph, color);
                 }
             }
         }
     }
 
     void renderJumpscareScreen() {
-        // Center the monster's face squarely on the screen
         const auto& currentSprite = stalker.frame0;
         int rowCount = currentSprite.size();
         int colCount = currentSprite[0].size();
@@ -890,7 +921,6 @@ public:
                 int screenX = centerXOffset + x;
                 int screenY = centerYOffset + y;
 
-                // Window Glitch effect: randomly scatter edge artifacts
                 if ((rand() % 100) < 5) {
                     screenX += (rand() % 5) - 2;
                 }
@@ -899,13 +929,12 @@ public:
                     char glyph = currentSprite[y][x];
                     if (glyph != ' ' && glyph != '.') {
                         uint32_t flashCol = ((rand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
-                        drawGlyph(screenX, screenY, glyph, flashCol);
+                        drawGlyphFine(screenX, screenY, glyph, flashCol);
                     }
                 }
             }
         }
 
-        // Keep creepy corrupted text flashing around the perimeter/windows
         std::vector<std::string> creepyPhrases = {
             "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
         };
@@ -914,7 +943,7 @@ public:
             int rx = rand() % (TOTAL_COLS - 15);
             int ry = rand() % (ROWS - 2);
             std::string phrase = creepyPhrases[rand() % creepyPhrases.size()];
-            drawText(rx, ry, phrase, RED_GOAL_BRIGHT);
+            drawTextFine(rx, ry, phrase, RED_GOAL_BRIGHT);
         }
     }
 
@@ -1021,7 +1050,7 @@ public:
                     }
 
                     if (floorGlyph != ' ') {
-                        drawGlyph(col, r + vOffset, floorGlyph, floorColor);
+                        drawGlyphFine(col, r + vOffset, floorGlyph, floorColor);
                     }
                 }
             }
@@ -1051,7 +1080,7 @@ public:
 
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
-                    drawGlyph(col, r + vOffset, wallGlyph, wallColor);
+                    drawGlyphFine(col, r + vOffset, wallGlyph, wallColor);
                 }
             }
 
@@ -1067,7 +1096,7 @@ public:
 
                 for (int r = stepTop; r <= stepBottom; ++r) {
                     if (r >= 0 && r < ROWS) {
-                        drawGlyph(col, r + vOffset, stepGlyph, stepColor);
+                        drawGlyphFine(col, r + vOffset, stepGlyph, stepColor);
                     }
                 }
             }
@@ -1079,11 +1108,11 @@ public:
 
         int cx = viewWidth / 2;
         int cy = horizon;
-        drawGlyph(cx, cy, '+', 0xFF94A3B8);
+        drawGlyphFine(cx, cy, '+', 0xFF94A3B8);
 
         if (player.takingDamage) {
             drawRectFilled(34, 27, 16, 3, 0xFF050505);
-            drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
+            drawTextFine(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
         drawRectFilled(1, 1, 52, 7, 0xFF050505);
@@ -1101,17 +1130,17 @@ public:
             elevColor = TIER_LOW_BRIGHT;
         }
 
-        drawText(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), elevColor);
+        drawTextFine(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), elevColor);
         
         if (corruptionLevel < 0.5f) {
-            drawText(2, 4, "TEST MAZE UTILITY v1.0", TIER_LOW_BRIGHT);
-            drawText(2, 6, "SYS: CLEAN", TIER_LOW_BRIGHT);
+            drawTextFine(2, 4, "TEST MAZE UTILITY v1.0", TIER_LOW_BRIGHT);
+            drawTextFine(2, 6, "SYS: CLEAN", TIER_LOW_BRIGHT);
         } else {
             uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
-            drawText(2, 4, "SYS ERR: HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
+            drawTextFine(2, 4, "SYS ERR: HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
 
             uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
-            drawText(2, 6, "SYS ERR: SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
+            drawTextFine(2, 6, "SYS ERR: SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
         }
 
         if (currentDifficulty == DIFF_EASY) {
@@ -1120,7 +1149,7 @@ public:
     }
 
     void renderSidebarMinimap() {
-        for (int r = 0; r < ROWS; ++r) drawGlyph(68, r, '|', 0xFF334155);
+        for (int r = 0; r < ROWS; ++r) drawGlyphFine(68, r, '|', 0xFF334155);
 
         int miniStartX = 72;
         int miniStartY = 3;
@@ -1147,22 +1176,41 @@ public:
                     mapCol = TIER_HIGH_BRIGHT;
                 } 
 
-                drawGlyph(miniStartX + c, miniStartY + r, mapCh, mapCol);
+                drawGlyphFine(miniStartX + c, miniStartY + r, mapCh, mapCol);
             }
         }
 
-        drawGlyph(miniStartX + int(player.posX), miniStartY + int(player.posY), 'O', 0xFF38BDF8);
+        // Render player directional vision beacon (pointing forward)
+        int pMapX = int(player.posX);
+        int pMapY = int(player.posY);
+        int lookAheadX = int(player.posX + player.dirX * 1.2f);
+        int lookAheadY = int(player.posY + player.dirY * 1.2f);
+        if (lookAheadX >= 0 && lookAheadX < MAP_W && lookAheadY >= 0 && lookAheadY < MAP_H) {
+            drawGlyphFine(miniStartX + lookAheadX, miniStartY + lookAheadY, '^', 0xFFF59E0B);
+        }
+        drawGlyphFine(miniStartX + pMapX, miniStartY + pMapY, 'O', 0xFF38BDF8);
 
-        drawText(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
-        drawText(72, 34, "[=] Stairs (Mid)", TIER_MID_BRIGHT);
-        drawText(72, 36, "[^] Overpass (High)", TIER_HIGH_BRIGHT);
-        drawText(72, 38, "[S] Start  [E] End", 0xFF64748B);
+        // Render monster dot on minimap if chasing (glitching/changing characters)
+        if (stalker.isChasing) {
+            int mX = int(stalker.x);
+            int mY = int(stalker.y);
+            if (mX >= 0 && mX < MAP_W && mY >= 0 && mY < MAP_H) {
+                const char glitchChars[] = "!@#$%&*X?";
+                char gChar = glitchChars[rand() % 9];
+                drawGlyphFine(miniStartX + mX, miniStartY + mY, gChar, RED_GOAL_BRIGHT);
+            }
+        }
+
+        drawTextFine(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
+        drawTextFine(72, 34, "[=] Stairs (Mid)", TIER_MID_BRIGHT);
+        drawTextFine(72, 36, "[^] Overpass (High)", TIER_HIGH_BRIGHT);
+        drawTextFine(72, 38, "[S] Start  [E] End", 0xFF64748B);
     }
 
     void renderTitleScreen() {
-        drawText(34, 12, "==============================", TIER_HIGH_BRIGHT);
-        drawText(34, 14, "     WALK ASCII 3D HORROR     ", TIER_HIGH_BRIGHT);
-        drawText(34, 16, "==============================", TIER_HIGH_BRIGHT);
+        drawTextStandard(34, 12, "==============================", TIER_HIGH_BRIGHT);
+        drawTextStandard(34, 14, "     WALK ASCII 3D HORROR     ", TIER_HIGH_BRIGHT);
+        drawTextStandard(34, 16, "==============================", TIER_HIGH_BRIGHT);
 
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
@@ -1176,54 +1224,54 @@ public:
         for (int i = 0; i < 3; ++i) {
             uint32_t col = (i == menuCursor) ? TIER_HIGH_BRIGHT : 0xFF64748B;
             std::string prefix = (i == menuCursor) ? "-> " : "   ";
-            drawText(32, 24 + i * 4, prefix + options[i], col);
+            drawTextStandard(32, 24 + i * 4, prefix + options[i], col);
         }
 
-        drawText(26, 44, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
+        drawTextStandard(26, 44, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
     }
 
     void renderPauseScreen() {
         drawRectFilled(30, 18, 40, 24, 0xEE050505);
-        drawText(38, 22, "========================", TIER_MID_BRIGHT);
-        drawText(38, 24, "      GAME PAUSED       ", TIER_MID_BRIGHT);
-        drawText(38, 26, "========================", TIER_MID_BRIGHT);
+        drawTextFine(38, 22, "========================", TIER_MID_BRIGHT);
+        drawTextFine(38, 24, "      GAME PAUSED       ", TIER_MID_BRIGHT);
+        drawTextFine(38, 26, "========================", TIER_MID_BRIGHT);
 
-        drawText(35, 32, "[R / ESC] RESUME GAME", TIER_HIGH_BRIGHT);
-        drawText(35, 36, "[Q] QUIT TO TITLE", RED_GOAL_BRIGHT);
-        drawText(34, 40, "DEV: [F1] SKIP LVL | [1-9] SET LVL", 0xFF64748B);
+        drawTextFine(35, 32, "[R / ESC] RESUME GAME", TIER_HIGH_BRIGHT);
+        drawTextFine(35, 36, "[Q] QUIT TO TITLE", RED_GOAL_BRIGHT);
+        drawTextFine(34, 40, "DEV: [F1] SKIP LVL | [1-9] SET LVL", 0xFF64748B);
     }
 
     void renderSuccessScreen() {
-        drawText(36, 12, "****************************", TIER_HIGH_BRIGHT);
-        drawText(36, 14, "      MAZE COMPLETED!       ", TIER_HIGH_BRIGHT);
-        drawText(36, 16, "****************************", TIER_HIGH_BRIGHT);
+        drawTextStandard(36, 12, "****************************", TIER_HIGH_BRIGHT);
+        drawTextStandard(36, 14, "      MAZE COMPLETED!       ", TIER_HIGH_BRIGHT);
+        drawTextStandard(36, 16, "****************************", TIER_HIGH_BRIGHT);
 
-        drawText(34, 22, "COMPLETED LEVEL:  " + std::to_string(currentLevel), 0xFFFFFFFF);
-        drawText(34, 25, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFFFFFFF);
-        drawText(34, 28, "TIME TAKEN:       " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
+        drawTextStandard(34, 22, "COMPLETED LEVEL:  " + std::to_string(currentLevel), 0xFFFFFFFF);
+        drawTextStandard(34, 25, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFFFFFFF);
+        drawTextStandard(34, 28, "TIME TAKEN:       " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
         
         if (corruptionLevel >= 0.5f) {
-            drawText(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", TIER_HIGH_BRIGHT);
-            drawText(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", TIER_HIGH_BRIGHT);
+            drawTextStandard(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", TIER_HIGH_BRIGHT);
+            drawTextStandard(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", TIER_HIGH_BRIGHT);
         }
 
-        drawText(28, 44, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", TIER_LOW_BRIGHT);
-        drawText(38, 47, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
+        drawTextStandard(28, 44, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", TIER_LOW_BRIGHT);
+        drawTextStandard(38, 47, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
     void renderGameOverScreen() {
-        drawText(36, 10, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
-        drawText(36, 12, "         GAME OVER          ", RED_GOAL_BRIGHT);
-        drawText(36, 14, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
+        drawTextStandard(36, 10, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
+        drawTextStandard(36, 12, "         GAME OVER          ", RED_GOAL_BRIGHT);
+        drawTextStandard(36, 14, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", RED_GOAL_BRIGHT);
 
-        drawText(28, 20, deathReason, RED_GOAL_BRIGHT);
+        drawTextStandard(28, 20, deathReason, RED_GOAL_BRIGHT);
 
-        drawText(34, 26, "DIED AT LEVEL:    " + std::to_string(currentLevel), 0xFFCBD5E1);
-        drawText(34, 29, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFCBD5E1);
-        drawText(34, 32, "SURVIVED TIME:    " + std::to_string(int(levelTime)) + " SECONDS", 0xFFCBD5E1);
+        drawTextStandard(34, 26, "DIED AT LEVEL:    " + std::to_string(currentLevel), 0xFFCBD5E1);
+        drawTextStandard(34, 29, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFCBD5E1);
+        drawTextStandard(34, 32, "SURVIVED TIME:    " + std::to_string(int(levelTime)) + " SECONDS", 0xFFCBD5E1);
 
-        drawText(32, 42, "PRESS [ENTER / SPACE] TO TRY AGAIN", TIER_HIGH_BRIGHT);
-        drawText(38, 45, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
+        drawTextStandard(32, 42, "PRESS [ENTER / SPACE] TO TRY AGAIN", TIER_HIGH_BRIGHT);
+        drawTextStandard(38, 45, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
     void render() {
