@@ -271,11 +271,9 @@ private:
         else                   return cDark;
     }
 
-void generateProceduralMultiLevelMaze() {
-        // Unique seed per level
+    void generateProceduralMultiLevelMaze() {
         srand(static_cast<unsigned int>(time(nullptr)) + currentLevel * 1337);
 
-        // 1. Reset grid to solid ground walls
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
                 worldMap[r][c].wallType = 1;
@@ -285,7 +283,6 @@ void generateProceduralMultiLevelMaze() {
             }
         }
 
-        // 2. Procedural DFS Maze carving
         std::stack<Point> stack;
         startPos = { 1, 1 };
         worldMap[startPos.y][startPos.x].wallType = 0;
@@ -316,7 +313,6 @@ void generateProceduralMultiLevelMaze() {
             }
         }
 
-        // 3. Procedural Elevation Zones (Elevates a random quadrant)
         int highZoneX = (rand() % 2 == 0) ? (MAP_W / 2) : 1;
         int highZoneY = (rand() % 2 == 0) ? (MAP_H / 2) : 1;
         int zoneW = MAP_W / 2;
@@ -331,10 +327,8 @@ void generateProceduralMultiLevelMaze() {
             }
         }
 
-        // 4. Place Stairs at Transition Chokepoints
         for (int y = 1; y < MAP_H - 1; ++y) {
             for (int x = 1; x < MAP_W - 1; ++x) {
-                // If a path tile is elevated...
                 if (worldMap[y][x].wallType == 0 && worldMap[y][x].floorH == 1.0f) {
                     const int nx[4] = { 1, -1, 0, 0 };
                     const int ny[4] = { 0, 0, 1, -1 };
@@ -343,9 +337,7 @@ void generateProceduralMultiLevelMaze() {
                         int adjX = x + nx[i];
                         int adjY = y + ny[i];
 
-                        // ...and touches a ground-level path tile
                         if (worldMap[adjY][adjX].wallType == 0 && worldMap[adjY][adjX].floorH == 0.0f) {
-                            // Turn this boundary tile into a stair landing
                             worldMap[y][x].floorH = 0.5f;
                             worldMap[y][x].isStairs = true;
                             break; 
@@ -355,7 +347,6 @@ void generateProceduralMultiLevelMaze() {
             }
         }
 
-        // 5. Goal placement
         endPos = { MAP_W - 2, MAP_H - 2 };
         worldMap[endPos.y][endPos.x].wallType = 2;
 
@@ -374,7 +365,6 @@ void generateProceduralMultiLevelMaze() {
         stalker.y = MAP_H / 2 + 0.5f;
         stalker.isChasing = false;
     }
-
 
     void startNewGame() {
         currentLevel = 1;
@@ -420,21 +410,17 @@ void generateProceduralMultiLevelMaze() {
 
         for (int y = 0; y < CHAR_H; ++y) {
             int drawY = startY + y;
-            // Prevent drawing above or below the screen bounds
             if (drawY < 0 || drawY >= NATIVE_HEIGHT) continue; 
-
             for (int x = 0; x < CHAR_W; ++x) {
                 int drawX = startX + x;
-                // Prevent drawing off the left or right edges
                 if (drawX < 0 || drawX >= NATIVE_WIDTH) continue; 
-                
                 if ((glyph[y] >> (7 - x)) & 1) {
                     pixelBuffer[drawY * NATIVE_WIDTH + drawX] = fgColor;
                 }
             }
         }
     }
-    
+
     void drawText(int col, int row, const std::string& text, uint32_t color) {
         for (size_t i = 0; i < text.size(); ++i) {
             if (col + i < TOTAL_COLS) {
@@ -609,12 +595,12 @@ public:
 
             if (worldMap[currTileY][nextTileX].wallType != 1) {
                 float hDiff = std::abs(worldMap[currTileY][nextTileX].floorH - currFloor);
-                if (hDiff <= 0.55f) player.posX += moveX;
+                if (hDiff <= 1.1f) player.posX += moveX;
             }
 
             if (worldMap[nextTileY][currTileX].wallType != 1) {
                 float hDiff = std::abs(worldMap[nextTileY][currTileX].floorH - currFloor);
-                if (hDiff <= 0.55f) player.posY += moveY;
+                if (hDiff <= 1.1f) player.posY += moveY;
             }
 
             player.stepAccumulator += std::hypot(player.posX - prevX, player.posY - prevY);
@@ -759,6 +745,7 @@ public:
                 vOffset = (rand() % 5) - 2; 
             }
 
+            // 1. Raycasted Textured Floor & Checkerboard
             for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
                 float straightDist = (ROWS * totalPlayerZ) / p;
@@ -775,10 +762,28 @@ public:
                     uint32_t floorColor = getElevationColor(sampledFloorH, straightDist, 0);
 
                     char floorGlyph = ' ';
+                    
                     if (worldMap[fTileY][fTileX].isStairs) {
                         floorGlyph = (int(straightDist * 3.0f) % 2 == 0) ? '=' : '_';
-                    } else if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
-                        floorGlyph = (sampledFloorH > 0.8f) ? '^' : '.';
+                    } 
+                    else if (sampledFloorH > 0.8f) {
+                        bool isCheck = ((fTileX + fTileY) % 2 == 0);
+                        floorGlyph = isCheck ? '#' : '-';
+                        
+                        if (corruptionLevel < 0.85f) {
+                            floorColor = isCheck ? TIER_HIGH_BRIGHT : TIER_HIGH_DARK;
+                        } else {
+                            floorColor = isCheck ? CORRUPT_BRIGHT : CORRUPT_DARK;
+                        }
+
+                        if (straightDist > 6.0f && (col % 2 != 0)) {
+                            floorGlyph = ' ';
+                        }
+                    } 
+                    else {
+                        if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
+                            floorGlyph = '.';
+                        }
                     }
 
                     if (corruptionLevel > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
@@ -891,7 +896,13 @@ public:
                 char mapCh = ' ';
                 uint32_t mapCol = 0xFF1E293B;
 
-                if (worldMap[r][c].wallType == 1) {
+                if (r == startPos.y && c == startPos.x) {
+                    mapCh = 'S';
+                    mapCol = TIER_HIGH_BRIGHT;
+                } else if (r == endPos.y && c == endPos.x) {
+                    mapCh = 'E';
+                    mapCol = RED_GOAL_BRIGHT;
+                } else if (worldMap[r][c].wallType == 1) {
                     mapCh = '#';
                     mapCol = 0xFF475569;
                 } else if (worldMap[r][c].isStairs) {
@@ -900,13 +911,7 @@ public:
                 } else if (worldMap[r][c].floorH > 0.7f) {
                     mapCh = '^';
                     mapCol = TIER_HIGH_BRIGHT;
-                } else if (r == startPos.y && c == startPos.x) {
-                    mapCh = 'S';
-                    mapCol = TIER_HIGH_BRIGHT;
-                } else if (r == endPos.y && c == endPos.x) {
-                    mapCh = 'E';
-                    mapCol = RED_GOAL_BRIGHT;
-                }
+                } 
 
                 drawGlyph(miniStartX + c, miniStartY + r, mapCh, mapCol);
             }
