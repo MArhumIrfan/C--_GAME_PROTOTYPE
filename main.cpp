@@ -271,7 +271,11 @@ private:
         else                   return cDark;
     }
 
-    void generateMazeWithOverpass() {
+void generateProceduralMultiLevelMaze() {
+        // Unique seed per level
+        srand(static_cast<unsigned int>(time(nullptr)) + currentLevel * 1337);
+
+        // 1. Reset grid to solid ground walls
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
                 worldMap[r][c].wallType = 1;
@@ -281,6 +285,7 @@ private:
             }
         }
 
+        // 2. Procedural DFS Maze carving
         std::stack<Point> stack;
         startPos = { 1, 1 };
         worldMap[startPos.y][startPos.x].wallType = 0;
@@ -311,23 +316,46 @@ private:
             }
         }
 
-        int midX = MAP_W / 2;
-        int midY = MAP_H / 2;
+        // 3. Procedural Elevation Zones (Elevates a random quadrant)
+        int highZoneX = (rand() % 2 == 0) ? (MAP_W / 2) : 1;
+        int highZoneY = (rand() % 2 == 0) ? (MAP_H / 2) : 1;
+        int zoneW = MAP_W / 2;
+        int zoneH = MAP_H / 2;
 
-        for (int x = midX - 3; x <= midX + 3; ++x) {
-            worldMap[midY][x].wallType = 0;
-            worldMap[midY][x].floorH = 1.0f;
-            worldMap[midY][x].ceilH = 3.0f;
+        for (int y = highZoneY; y < highZoneY + zoneH; ++y) {
+            for (int x = highZoneX; x < highZoneX + zoneW; ++x) {
+                if (worldMap[y][x].wallType == 0) {
+                    worldMap[y][x].floorH = 1.0f;
+                    worldMap[y][x].ceilH = 3.2f;
+                }
+            }
         }
 
-        worldMap[midY][midX - 4].wallType = 0;
-        worldMap[midY][midX - 4].floorH = 0.5f;
-        worldMap[midY][midX - 4].isStairs = true;
+        // 4. Place Stairs at Transition Chokepoints
+        for (int y = 1; y < MAP_H - 1; ++y) {
+            for (int x = 1; x < MAP_W - 1; ++x) {
+                // If a path tile is elevated...
+                if (worldMap[y][x].wallType == 0 && worldMap[y][x].floorH == 1.0f) {
+                    const int nx[4] = { 1, -1, 0, 0 };
+                    const int ny[4] = { 0, 0, 1, -1 };
 
-        worldMap[midY][midX + 4].wallType = 0;
-        worldMap[midY][midX + 4].floorH = 0.5f;
-        worldMap[midY][midX + 4].isStairs = true;
+                    for (int i = 0; i < 4; ++i) {
+                        int adjX = x + nx[i];
+                        int adjY = y + ny[i];
 
+                        // ...and touches a ground-level path tile
+                        if (worldMap[adjY][adjX].wallType == 0 && worldMap[adjY][adjX].floorH == 0.0f) {
+                            // Turn this boundary tile into a stair landing
+                            worldMap[y][x].floorH = 0.5f;
+                            worldMap[y][x].isStairs = true;
+                            break; 
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Goal placement
         endPos = { MAP_W - 2, MAP_H - 2 };
         worldMap[endPos.y][endPos.x].wallType = 2;
 
@@ -347,6 +375,7 @@ private:
         stalker.isChasing = false;
     }
 
+    
     void startNewGame() {
         currentLevel = 1;
         totalSteps = 0;
@@ -354,7 +383,7 @@ private:
         corruptionLevel = 0.0f; 
         player.sanity = 100.0f;
         player.health = 100.0f;
-        generateMazeWithOverpass();
+        generateProceduralMultiLevelMaze();
         currentState = STATE_PLAYING;
         setCaptureMouse(true);
 
@@ -373,7 +402,7 @@ private:
         
         corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.11f);
         
-        generateMazeWithOverpass();
+        generateProceduralMultiLevelMaze();
         currentState = STATE_PLAYING;
         setCaptureMouse(true);
 
@@ -406,7 +435,6 @@ private:
         }
     }
 
-    // Solid Background Box Tool
     void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color) {
         int x0 = startCol * CHAR_W;
         int y0 = startRow * CHAR_H;
@@ -564,17 +592,21 @@ public:
             float prevX = player.posX;
             float prevY = player.posY;
 
+            int currTileX = int(player.posX);
+            int currTileY = int(player.posY);
+            float currFloor = worldMap[currTileY][currTileX].floorH;
+
             int nextTileX = int(player.posX + moveX + bufX);
             int nextTileY = int(player.posY + moveY + bufY);
 
-            if (worldMap[int(player.posY)][nextTileX].wallType != 1) {
-                float hDiff = std::abs(worldMap[int(player.posY)][nextTileX].floorH - player.posZ);
-                if (hDiff <= 0.65f) player.posX += moveX;
+            if (worldMap[currTileY][nextTileX].wallType != 1) {
+                float hDiff = std::abs(worldMap[currTileY][nextTileX].floorH - currFloor);
+                if (hDiff <= 0.55f) player.posX += moveX;
             }
 
-            if (worldMap[nextTileY][int(player.posX)].wallType != 1) {
-                float hDiff = std::abs(worldMap[nextTileY][int(player.posX)].floorH - player.posZ);
-                if (hDiff <= 0.65f) player.posY += moveY;
+            if (worldMap[nextTileY][currTileX].wallType != 1) {
+                float hDiff = std::abs(worldMap[nextTileY][currTileX].floorH - currFloor);
+                if (hDiff <= 0.55f) player.posY += moveY;
             }
 
             player.stepAccumulator += std::hypot(player.posX - prevX, player.posY - prevY);
@@ -584,9 +616,9 @@ public:
             }
         }
 
-        int currTileX = int(player.posX);
-        int currTileY = int(player.posY);
-        player.targetPosZ = worldMap[currTileY][currTileX].floorH;
+        int standingX = int(player.posX);
+        int standingY = int(player.posY);
+        player.targetPosZ = worldMap[standingY][standingX].floorH;
         player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
         float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
@@ -645,7 +677,7 @@ public:
             return;
         }
 
-        if (currTileX == endPos.x && currTileY == endPos.y) {
+        if (standingX == endPos.x && standingY == endPos.y) {
             currentState = STATE_SUCCESS;
             setCaptureMouse(false);
             SDL_LockAudioDevice(audioDevice);
@@ -802,13 +834,11 @@ public:
         int cy = horizon;
         drawGlyph(cx, cy, '+', 0xFF94A3B8);
 
-        // Warning Box with Solid Background
         if (player.takingDamage) {
             drawRectFilled(34, 27, 16, 3, 0xFF050505);
             drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
-        // Main HUD with Solid Background
         drawRectFilled(1, 1, 52, 7, 0xFF050505);
 
         std::string elevStr;
@@ -939,8 +969,6 @@ public:
     }
 
     void render() {
-        // This clears the entire screen to dark blue. 
-        // 3D walls DO NOT draw on Success or GameOver states, so text is never blocked!
         std::fill(pixelBuffer.begin(), pixelBuffer.end(), 0xFF080C14);
 
         if (currentState == STATE_TITLE) renderTitleScreen();
