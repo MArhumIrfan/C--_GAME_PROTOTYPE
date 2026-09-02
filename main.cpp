@@ -9,10 +9,11 @@
 #include <ctime>
 #include <stack>
 
-constexpr int CHAR_W = 8;
-constexpr int CHAR_H = 8;
-constexpr int TOTAL_COLS = 100;
-constexpr int ROWS = 60;
+// Shrink font character dimensions from 8x8 to 6x6 for higher resolution detail
+constexpr int CHAR_W = 6;
+constexpr int CHAR_H = 6;
+constexpr int TOTAL_COLS = 133; // Scales up columns to maintain aspect ratio
+constexpr int ROWS = 80;         // Scales up rows for finer vertical detail
 constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;  
 constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;       
 
@@ -141,7 +142,6 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         }
 
         if (audio->isJumpscare) {
-            // Demonic piercing shriek mixed with white noise static
             audio->screamPhase += (350.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
             if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
             
@@ -775,7 +775,7 @@ public:
                 if (distToMonster < 0.75f) {
                     deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
                     currentState = STATE_JUMPSCARE;
-                    jumpscareTimer = 2.5f; // Jumpscare lasts 2.5 seconds
+                    jumpscareTimer = 2.5f; 
                     setCaptureMouse(false);
                     
                     SDL_LockAudioDevice(audioDevice);
@@ -877,34 +877,42 @@ public:
     }
 
     void renderJumpscareScreen() {
-        // Flash full screen monster art and creepy text
+        // Center the monster's face squarely on the screen
         const auto& currentSprite = stalker.frame0;
         int rowCount = currentSprite.size();
         int colCount = currentSprite[0].size();
 
-        // Render monster scaled to fill screen center
-        for (int y = 0; y < ROWS; ++y) {
-            for (int x = 10; x < TOTAL_COLS - 10; ++x) {
-                int texX = (x - 10) * colCount / (TOTAL_COLS - 20);
-                int texY = y * rowCount / ROWS;
-                if (texX >= 0 && texX < colCount && texY >= 0 && texY < rowCount) {
-                    char glyph = currentSprite[texY][texX];
+        int centerXOffset = (TOTAL_COLS - colCount) / 2;
+        int centerYOffset = (ROWS - rowCount) / 2;
+
+        for (int y = 0; y < rowCount; ++y) {
+            for (int x = 0; x < colCount; ++x) {
+                int screenX = centerXOffset + x;
+                int screenY = centerYOffset + y;
+
+                // Window Glitch effect: randomly scatter edge artifacts
+                if ((rand() % 100) < 5) {
+                    screenX += (rand() % 5) - 2;
+                }
+
+                if (screenX >= 0 && screenX < TOTAL_COLS && screenY >= 0 && screenY < ROWS) {
+                    char glyph = currentSprite[y][x];
                     if (glyph != ' ' && glyph != '.') {
                         uint32_t flashCol = ((rand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
-                        drawGlyph(x, y, glyph, flashCol);
+                        drawGlyph(screenX, screenY, glyph, flashCol);
                     }
                 }
             }
         }
 
-        // Random flashing creepy corrupted text around the screen
+        // Keep creepy corrupted text flashing around the perimeter/windows
         std::vector<std::string> creepyPhrases = {
             "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
         };
         
-        for (int i = 0; i < 4; ++i) {
-            int rx = rand() % 60 + 5;
-            int ry = rand() % 50 + 5;
+        for (int i = 0; i < 5; ++i) {
+            int rx = rand() % (TOTAL_COLS - 15);
+            int ry = rand() % (ROWS - 2);
             std::string phrase = creepyPhrases[rand() % creepyPhrases.size()];
             drawText(rx, ry, phrase, RED_GOAL_BRIGHT);
         }
