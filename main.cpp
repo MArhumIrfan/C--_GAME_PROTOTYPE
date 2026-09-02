@@ -9,7 +9,6 @@
 #include <ctime>
 #include <stack>
 
-// Virtual Text Grid Resolution (Native 800x480)
 constexpr int CHAR_W = 8;
 constexpr int CHAR_H = 8;
 constexpr int TOTAL_COLS = 100;
@@ -36,19 +35,22 @@ constexpr double FIXED_TIMESTEP = 1000.0 / 60.0;
 constexpr int MAP_W = 27;
 constexpr int MAP_H = 27;
 
-// High-contrast CRT green palette
-constexpr uint32_t CRT_LIGHT_BRIGHT = 0xFF4ADE80; // Bright green (E-W walls up close)
-constexpr uint32_t CRT_LIGHT_MID    = 0xFF22C55E; // Standard green (E-W mid)
-constexpr uint32_t CRT_LIGHT_DIM    = 0xFF16A34A; // Dim green (E-W far)
+// --- ELEVATION-BASED DYNAMIC PALETTES (Dark -> Bright) ---
+// Ground Level (0.0): Deep Dark Forest Greens
+constexpr uint32_t TIER_LOW_BRIGHT  = 0xFF16A34A;
+constexpr uint32_t TIER_LOW_MID     = 0xFF15803D;
+constexpr uint32_t TIER_LOW_DARK    = 0xFF14532D;
 
-constexpr uint32_t CRT_DARK_BRIGHT  = 0xFF15803D; // Dark green (N-S walls up close)
-constexpr uint32_t CRT_DARK_MID     = 0xFF166534; // Dark green (N-S mid)
-constexpr uint32_t CRT_DARK_DIM     = 0xFF14532D; // Dark green (N-S far)
+// Mid Incline / Stairs (0.5): Vibrant Cyan
+constexpr uint32_t TIER_MID_BRIGHT  = 0xFF38BDF8;
+constexpr uint32_t TIER_MID_MID     = 0xFF0284C7;
+constexpr uint32_t TIER_MID_DARK    = 0xFF0369A1;
 
-// Distinct colors for elevation & steps
-constexpr uint32_t CRT_STAIR_BRIGHT = 0xFF38BDF8; // Cyan stair treads
-constexpr uint32_t CRT_STAIR_DARK   = 0xFF0284C7; // Dim cyan
-constexpr uint32_t CRT_LEDGE_COLOR  = 0xFFF59E0B; // Amber warning for drop-off ledges
+// High Platform / Overpass (1.0+): High-Illumination Neon Lime
+constexpr uint32_t TIER_HIGH_BRIGHT = 0xFF86EFAC;
+constexpr uint32_t TIER_HIGH_MID    = 0xFF4ADE80;
+constexpr uint32_t TIER_HIGH_DARK   = 0xFF22C55E;
+
 constexpr uint32_t RED_GOAL_BRIGHT  = 0xFFF43F5E;
 constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
 
@@ -67,7 +69,6 @@ enum Difficulty {
     DIFF_EASY   = 1
 };
 
-// 8x8 Minimal Bitmap Font
 const uint8_t FONT_8X8[96][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, {0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00},
     {0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00}, {0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00},
@@ -173,7 +174,7 @@ private:
 
     GameState currentState = STATE_TITLE;
     Difficulty currentDifficulty = DIFF_NORMAL;
-    int currentResIndex = 2; // Default 1366x768
+    int currentResIndex = 2;
     int menuCursor = 0;
 
     AudioState audioState;
@@ -228,6 +229,28 @@ private:
 
     void setCaptureMouse(bool capture) {
         SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
+    }
+
+    uint32_t getElevationColor(float elevation, float dist, int side) {
+        uint32_t cBright, cMid, cDark;
+
+        if (elevation >= 0.85f) {
+            cBright = TIER_HIGH_BRIGHT;
+            cMid    = TIER_HIGH_MID;
+            cDark   = TIER_HIGH_DARK;
+        } else if (elevation >= 0.35f) {
+            cBright = TIER_MID_BRIGHT;
+            cMid    = TIER_MID_MID;
+            cDark   = TIER_MID_DARK;
+        } else {
+            cBright = TIER_LOW_BRIGHT;
+            cMid    = TIER_LOW_MID;
+            cDark   = TIER_LOW_DARK;
+        }
+
+        if (dist < 3.0f)       return (side == 0) ? cBright : cMid;
+        else if (dist < 6.5f)  return (side == 0) ? cMid : cDark;
+        else                   return cDark;
     }
 
     void generateMazeWithOverpass() {
@@ -366,7 +389,7 @@ public:
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) return false;
 
         window = SDL_CreateWindow(
-            "Walk ASCII 3D: Multi-Floor & Stairs Engine",
+            "Walk ASCII 3D Horror",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             RESOLUTION_PRESETS[currentResIndex].width,
             RESOLUTION_PRESETS[currentResIndex].height,
@@ -404,11 +427,9 @@ public:
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) isRunning = false;
 
-            // 1. Mouse Motion for Smooth Looking
             if (currentState == STATE_PLAYING && event.type == SDL_MOUSEMOTION) {
                 float rotAngle = event.motion.xrel * player.mouseSensitivity;
 
-                // Horizontal Yaw
                 float oldDirX = player.dirX;
                 player.dirX = player.dirX * cos(rotAngle) - player.dirY * sin(rotAngle);
                 player.dirY = oldDirX * sin(rotAngle) + player.dirY * cos(rotAngle);
@@ -417,7 +438,6 @@ public:
                 player.planeX = player.planeX * cos(rotAngle) - player.planeY * sin(rotAngle);
                 player.planeY = oldPlaneX * sin(rotAngle) + player.planeY * cos(rotAngle);
 
-                // Vertical Pitch
                 player.pitch -= event.motion.yrel * 0.12f;
                 player.pitch = std::clamp(player.pitch, -22.0f, 22.0f);
             }
@@ -472,7 +492,6 @@ public:
             }
         }
 
-        // 2. Keyboard Polling for WASD Movement & Strafe
         if (currentState == STATE_PLAYING) {
             const uint8_t* state = SDL_GetKeyboardState(NULL);
             player.forward = 0;
@@ -480,8 +499,8 @@ public:
 
             if (state[SDL_SCANCODE_W]) player.forward += 1;
             if (state[SDL_SCANCODE_S]) player.forward -= 1;
-            if (state[SDL_SCANCODE_A]) player.strafe -= 1; // Strafe left
-            if (state[SDL_SCANCODE_D]) player.strafe += 1; // Strafe right
+            if (state[SDL_SCANCODE_A]) player.strafe -= 1; 
+            if (state[SDL_SCANCODE_D]) player.strafe += 1; 
         }
     }
 
@@ -495,9 +514,8 @@ public:
         // 1. WASD Vector Movement (Forward + Strafe)
         if (player.forward != 0 || player.strafe != 0) {
             float forwardStep = player.forward * player.moveSpeed * dtSec;
-            float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec; // Slightly slower strafe
+            float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec;
 
-            // Strafe vector is perpendicular to dir vector: (dirY, -dirX)
             float moveX = player.dirX * forwardStep + player.dirY * strafeStep;
             float moveY = player.dirY * forwardStep - player.dirX * strafeStep;
 
@@ -510,13 +528,11 @@ public:
             int nextTileX = int(player.posX + moveX + bufX);
             int nextTileY = int(player.posY + moveY + bufY);
 
-            // Move along X with step-height tolerance
             if (worldMap[int(player.posY)][nextTileX].wallType != 1) {
                 float hDiff = std::abs(worldMap[int(player.posY)][nextTileX].floorH - player.posZ);
                 if (hDiff <= 0.65f) player.posX += moveX;
             }
 
-            // Move along Y with step-height tolerance
             if (worldMap[nextTileY][int(player.posX)].wallType != 1) {
                 float hDiff = std::abs(worldMap[nextTileY][int(player.posX)].floorH - player.posZ);
                 if (hDiff <= 0.65f) player.posY += moveY;
@@ -529,7 +545,7 @@ public:
             }
         }
 
-        // 2. Vertical Stair Step Interpolation
+        // 2. Continuous Vertical Height Tracking
         int currTileX = int(player.posX);
         int currTileY = int(player.posY);
         player.targetPosZ = worldMap[currTileY][currTileX].floorH;
@@ -604,7 +620,6 @@ public:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    // --- STEP RISER & ELEVATION RAYCASTER ---
     void render3DView() {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         float totalPlayerZ = player.posZ + player.eyeHeight;
@@ -632,7 +647,7 @@ public:
             float stepRiserDist = -1.0f;
             float stepFloorDiff = 0.0f;
             bool hitStepRiser = false;
-            bool stepIsStair = false;
+            float stepElevation = 0.0f;
 
             while (hit == 0) {
                 if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
@@ -644,7 +659,7 @@ public:
                         hitStepRiser = true;
                         stepFloorDiff = currCellFloor - prevFloorH;
                         stepRiserDist = (side == 0) ? (sideDistX - deltaDistX) : (sideDistY - deltaDistY);
-                        stepIsStair = worldMap[mapY][mapX].isStairs;
+                        stepElevation = currCellFloor;
                     }
                     prevFloorH = currCellFloor;
 
@@ -658,18 +673,36 @@ public:
             else           perpWallDist = (sideDistY - deltaDistY);
             if (perpWallDist < 0.05f) perpWallDist = 0.05f;
 
-            // 1. Draw Textured Floor
-            for (int r = horizon; r < ROWS; ++r) {
+            // 1. Raycasted Textured Floor 
+            for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
-                if (p > 0) {
-                    float rowDist = (ROWS * totalPlayerZ) / p;
-                    if (rowDist < 8.0f && (int(rowDist * 4.0f) % 2 == 0) && (col % 3 == 0)) {
-                        drawGlyph(col, r, '.', 0xFF14532D);
+                float straightDist = (ROWS * totalPlayerZ) / p;
+                float weight = straightDist / perpWallDist;
+
+                float currentFloorX = weight * (player.posX + rayDirX * perpWallDist) + (1.0f - weight) * player.posX;
+                float currentFloorY = weight * (player.posY + rayDirY * perpWallDist) + (1.0f - weight) * player.posY;
+
+                int fTileX = int(currentFloorX);
+                int fTileY = int(currentFloorY);
+
+                if (fTileX >= 0 && fTileX < MAP_W && fTileY >= 0 && fTileY < MAP_H) {
+                    float sampledFloorH = worldMap[fTileY][fTileX].floorH;
+                    uint32_t floorColor = getElevationColor(sampledFloorH, straightDist, 0);
+
+                    char floorGlyph = ' ';
+                    if (worldMap[fTileY][fTileX].isStairs) {
+                        floorGlyph = (int(straightDist * 3.0f) % 2 == 0) ? '=' : '_';
+                    } else if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
+                        floorGlyph = (sampledFloorH > 0.8f) ? '^' : '.';
+                    }
+
+                    if (floorGlyph != ' ') {
+                        drawGlyph(col, r, floorGlyph, floorColor);
                     }
                 }
             }
 
-            // 2. Draw Solid Walls
+            // 2. Solid Walls
             float wallFloorH = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].floorH : 0.0f;
             float wallCeilH  = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].ceilH : 2.0f;
 
@@ -689,15 +722,7 @@ public:
             if (hit == 2) {
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
             } else {
-                if (side == 0) {
-                    if (perpWallDist < 3.0f)      wallColor = CRT_LIGHT_BRIGHT;
-                    else if (perpWallDist < 6.5f) wallColor = CRT_LIGHT_MID;
-                    else                          wallColor = CRT_LIGHT_DIM;
-                } else {
-                    if (perpWallDist < 3.0f)      wallColor = CRT_DARK_BRIGHT;
-                    else if (perpWallDist < 6.5f) wallColor = CRT_DARK_MID;
-                    else                          wallColor = CRT_DARK_DIM;
-                }
+                wallColor = getElevationColor(wallFloorH, perpWallDist, side);
             }
 
             for (int r = 0; r < ROWS; ++r) {
@@ -706,7 +731,7 @@ public:
                 }
             }
 
-            // 3. Render Elevation Risers (Stairs & Ledges)
+            // 3. Elevation Step-Risers
             if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist) {
                 float lowH = std::min(prevFloorH, prevFloorH + stepFloorDiff);
                 float highH = std::max(prevFloorH, prevFloorH + stepFloorDiff);
@@ -714,16 +739,8 @@ public:
                 int stepTop = horizon - int(((highH - totalPlayerZ) * ROWS) / stepRiserDist);
                 int stepBottom = horizon - int(((lowH - totalPlayerZ) * ROWS) / stepRiserDist);
 
-                char stepGlyph = '=';
-                uint32_t stepColor = CRT_STAIR_BRIGHT;
-
-                if (stepIsStair) {
-                    stepGlyph = (int(stepRiserDist * 4) % 2 == 0) ? '=' : '_';
-                    stepColor = (stepRiserDist < 3.0f) ? CRT_STAIR_BRIGHT : CRT_STAIR_DARK;
-                } else {
-                    stepGlyph = (stepFloorDiff > 0) ? '^' : 'v';
-                    stepColor = CRT_LEDGE_COLOR;
-                }
+                uint32_t stepColor = getElevationColor(stepElevation, stepRiserDist, 0);
+                char stepGlyph = (stepFloorDiff > 0) ? '=' : 'v';
 
                 for (int r = stepTop; r <= stepBottom; ++r) {
                     if (r >= 0 && r < ROWS) {
@@ -733,7 +750,6 @@ public:
             }
         }
 
-        // Center Crosshair
         int cx = viewWidth / 2;
         int cy = horizon;
         drawGlyph(cx, cy, '+', 0xFF94A3B8);
@@ -742,14 +758,25 @@ public:
             drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
-        // Live HUD
-        std::string elevStr = (player.posZ > 0.7f) ? "OVERPASS [HIGH]" : ((player.posZ > 0.2f) ? "STAIRS [MID]" : "GROUND [LOW]");
-        drawText(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), CRT_LIGHT_MID);
+        std::string elevStr;
+        uint32_t elevColor;
+        if (player.posZ > 0.7f) {
+            elevStr = "OVERPASS [HIGH]";
+            elevColor = TIER_HIGH_BRIGHT;
+        } else if (player.posZ > 0.2f) {
+            elevStr = "STAIRS [MID]";
+            elevColor = TIER_MID_BRIGHT;
+        } else {
+            elevStr = "GROUND [LOW]";
+            elevColor = TIER_LOW_BRIGHT;
+        }
+
+        drawText(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), elevColor);
         
-        uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : CRT_LIGHT_BRIGHT);
+        uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
         drawText(2, 4, "HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
 
-        uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : CRT_LIGHT_BRIGHT);
+        uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
         drawText(2, 6, "SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
 
         if (currentDifficulty == DIFF_EASY) {
@@ -775,13 +802,13 @@ public:
                     mapCol = 0xFF475569;
                 } else if (worldMap[r][c].isStairs) {
                     mapCh = '=';
-                    mapCol = CRT_STAIR_BRIGHT;
+                    mapCol = TIER_MID_BRIGHT;
                 } else if (worldMap[r][c].floorH > 0.7f) {
                     mapCh = '^';
-                    mapCol = CRT_LIGHT_BRIGHT;
+                    mapCol = TIER_HIGH_BRIGHT;
                 } else if (r == startPos.y && c == startPos.x) {
                     mapCh = 'S';
-                    mapCol = CRT_LIGHT_BRIGHT;
+                    mapCol = TIER_HIGH_BRIGHT;
                 } else if (r == endPos.y && c == endPos.x) {
                     mapCh = 'E';
                     mapCol = RED_GOAL_BRIGHT;
@@ -794,15 +821,15 @@ public:
         drawGlyph(miniStartX + int(player.posX), miniStartY + int(player.posY), 'O', 0xFF38BDF8);
 
         drawText(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
-        drawText(72, 34, "[=] Stairs (Climbable)", CRT_STAIR_BRIGHT);
-        drawText(72, 36, "[^] Overpass Platform", CRT_LIGHT_BRIGHT);
+        drawText(72, 34, "[=] Stairs (Mid)", TIER_MID_BRIGHT);
+        drawText(72, 36, "[^] Overpass (High)", TIER_HIGH_BRIGHT);
         drawText(72, 38, "[S] Start  [E] End", 0xFF64748B);
     }
 
     void renderTitleScreen() {
-        drawText(34, 12, "==============================", CRT_LIGHT_BRIGHT);
-        drawText(34, 14, "     WALK ASCII 3D HORROR     ", CRT_LIGHT_BRIGHT);
-        drawText(34, 16, "==============================", CRT_LIGHT_BRIGHT);
+        drawText(34, 12, "==============================", TIER_HIGH_BRIGHT);
+        drawText(34, 14, "     WALK ASCII 3D HORROR     ", TIER_HIGH_BRIGHT);
+        drawText(34, 16, "==============================", TIER_HIGH_BRIGHT);
 
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
@@ -814,7 +841,7 @@ public:
         };
 
         for (int i = 0; i < 3; ++i) {
-            uint32_t col = (i == menuCursor) ? CRT_LIGHT_BRIGHT : 0xFF64748B;
+            uint32_t col = (i == menuCursor) ? TIER_HIGH_BRIGHT : 0xFF64748B;
             std::string prefix = (i == menuCursor) ? "-> " : "   ";
             drawText(32, 24 + i * 4, prefix + options[i], col);
         }
@@ -823,17 +850,17 @@ public:
     }
 
     void renderSuccessScreen() {
-        drawText(36, 12, "****************************", CRT_LIGHT_BRIGHT);
-        drawText(36, 14, "      MAZE COMPLETED!       ", CRT_LIGHT_BRIGHT);
-        drawText(36, 16, "****************************", CRT_LIGHT_BRIGHT);
+        drawText(36, 12, "****************************", TIER_HIGH_BRIGHT);
+        drawText(36, 14, "      MAZE COMPLETED!       ", TIER_HIGH_BRIGHT);
+        drawText(36, 16, "****************************", TIER_HIGH_BRIGHT);
 
         drawText(34, 22, "COMPLETED LEVEL:  " + std::to_string(currentLevel), 0xFFFFFFFF);
         drawText(34, 25, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFFFFFFF);
         drawText(34, 28, "TIME TAKEN:       " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
-        drawText(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", CRT_LIGHT_BRIGHT);
-        drawText(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", CRT_LIGHT_BRIGHT);
+        drawText(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", TIER_HIGH_BRIGHT);
+        drawText(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", TIER_HIGH_BRIGHT);
 
-        drawText(28, 44, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", CRT_LIGHT_MID);
+        drawText(28, 44, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", TIER_LOW_BRIGHT);
         drawText(38, 47, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
@@ -848,7 +875,7 @@ public:
         drawText(34, 29, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFCBD5E1);
         drawText(34, 32, "SURVIVED TIME:    " + std::to_string(int(levelTime)) + " SECONDS", 0xFFCBD5E1);
 
-        drawText(32, 42, "PRESS [ENTER / SPACE] TO TRY AGAIN", CRT_LIGHT_BRIGHT);
+        drawText(32, 42, "PRESS [ENTER / SPACE] TO TRY AGAIN", TIER_HIGH_BRIGHT);
         drawText(38, 45, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
     }
 
