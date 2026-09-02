@@ -375,7 +375,7 @@ void generateProceduralMultiLevelMaze() {
         stalker.isChasing = false;
     }
 
-    
+
     void startNewGame() {
         currentLevel = 1;
         totalSteps = 0;
@@ -419,14 +419,22 @@ void generateProceduralMultiLevelMaze() {
         int startY = row * CHAR_H;
 
         for (int y = 0; y < CHAR_H; ++y) {
+            int drawY = startY + y;
+            // Prevent drawing above or below the screen bounds
+            if (drawY < 0 || drawY >= NATIVE_HEIGHT) continue; 
+
             for (int x = 0; x < CHAR_W; ++x) {
+                int drawX = startX + x;
+                // Prevent drawing off the left or right edges
+                if (drawX < 0 || drawX >= NATIVE_WIDTH) continue; 
+                
                 if ((glyph[y] >> (7 - x)) & 1) {
-                    pixelBuffer[(startY + y) * NATIVE_WIDTH + (startX + x)] = fgColor;
+                    pixelBuffer[drawY * NATIVE_WIDTH + drawX] = fgColor;
                 }
             }
         }
     }
-
+    
     void drawText(int col, int row, const std::string& text, uint32_t color) {
         for (size_t i = 0; i < text.size(); ++i) {
             if (col + i < TOTAL_COLS) {
