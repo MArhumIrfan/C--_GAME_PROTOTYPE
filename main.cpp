@@ -13,8 +13,8 @@ constexpr int CHAR_W = 8;
 constexpr int CHAR_H = 8;
 constexpr int TOTAL_COLS = 100;
 constexpr int ROWS = 60;
-constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;  // 800
-constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;       // 480
+constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;
+constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;
 
 struct ResolutionPreset {
     int width;
@@ -35,21 +35,23 @@ constexpr double FIXED_TIMESTEP = 1000.0 / 60.0;
 constexpr int MAP_W = 27;
 constexpr int MAP_H = 27;
 
-// --- ELEVATION-BASED DYNAMIC PALETTES (Dark -> Bright) ---
-// Ground Level (0.0): Deep Dark Forest Greens
+// Clean Palettes
 constexpr uint32_t TIER_LOW_BRIGHT  = 0xFF16A34A;
 constexpr uint32_t TIER_LOW_MID     = 0xFF15803D;
 constexpr uint32_t TIER_LOW_DARK    = 0xFF14532D;
 
-// Mid Incline / Stairs (0.5): Vibrant Cyan
 constexpr uint32_t TIER_MID_BRIGHT  = 0xFF38BDF8;
 constexpr uint32_t TIER_MID_MID     = 0xFF0284C7;
 constexpr uint32_t TIER_MID_DARK    = 0xFF0369A1;
 
-// High Platform / Overpass (1.0+): High-Illumination Neon Lime
 constexpr uint32_t TIER_HIGH_BRIGHT = 0xFF86EFAC;
 constexpr uint32_t TIER_HIGH_MID    = 0xFF4ADE80;
 constexpr uint32_t TIER_HIGH_DARK   = 0xFF22C55E;
+
+// Corrupted Nightmare Palettes (Reds & Ambers)
+constexpr uint32_t CORRUPT_BRIGHT   = 0xFFF43F5E;
+constexpr uint32_t CORRUPT_MID      = 0xFFBE123C;
+constexpr uint32_t CORRUPT_DARK     = 0xFF881337;
 
 constexpr uint32_t RED_GOAL_BRIGHT  = 0xFFF43F5E;
 constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
@@ -106,8 +108,8 @@ const uint8_t FONT_8X8[96][8] = {
 struct Point { int x, y; };
 
 struct MapCell {
-    int wallType = 0;      // 0 = Air, 1 = Wall, 2 = Goal
-    float floorH = 0.0f;   // 0.0 = Ground, 0.5 = Stairs, 1.0 = Overpass
+    int wallType = 0;
+    float floorH = 0.0f;
     float ceilH = 2.0f;
     bool isStairs = false;
 };
@@ -118,6 +120,7 @@ struct AudioState {
     float monsterPhase = 0.0f;
     float sanity = 100.0f;
     float monsterDist = 20.0f;
+    float corruption = 0.0f;
     bool isChasing = false;
     bool inGame = false;
 };
@@ -133,9 +136,14 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
             continue;
         }
 
+        // Corruption seamlessly gates the audio channels
+        float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
+        float mixHeart   = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
+        float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
+
         audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
         if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
-        float ambient = std::sin(audio->ambientPhase) * 0.08f;
+        float ambient = std::sin(audio->ambientPhase) * 0.08f * mixAmbient;
 
         float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
         audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
@@ -146,7 +154,7 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
         else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
 
-        float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f);
+        float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
 
         float monsterAudio = 0.0f;
         if (audio->monsterDist < 10.0f) {
@@ -156,7 +164,7 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
             if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
 
             float noise = ((rand() % 2000) / 1000.0f - 1.0f);
-            monsterAudio = noise * (std::sin(audio->monsterPhase) * 0.5f + 0.5f) * proxVol * 0.4f;
+            monsterAudio = noise * (std::sin(audio->monsterPhase) * 0.5f + 0.5f) * proxVol * 0.4f * mixMonster;
         }
 
         buffer[i] = static_cast<int16_t>(std::clamp(ambient + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
@@ -185,6 +193,7 @@ private:
     int currentLevel = 1;
     int totalSteps = 0;
     float levelTime = 0.0f;
+    float corruptionLevel = 0.0f; // The Global Anomaly Tracker
     std::string deathReason = "";
 
     struct Player {
@@ -202,8 +211,8 @@ private:
         float moveSpeed = 3.2f;
         float mouseSensitivity = 0.0022f;
 
-        int forward = 0; // W/S (+1 / -1)
-        int strafe = 0;  // A/D (-1 / +1)
+        int forward = 0; 
+        int strafe = 0;  
         float stepAccumulator = 0.0f;
         
         float sanity = 100.0f;
@@ -234,18 +243,31 @@ private:
     uint32_t getElevationColor(float elevation, float dist, int side) {
         uint32_t cBright, cMid, cDark;
 
-        if (elevation >= 0.85f) {
-            cBright = TIER_HIGH_BRIGHT;
-            cMid    = TIER_HIGH_MID;
-            cDark   = TIER_HIGH_DARK;
-        } else if (elevation >= 0.35f) {
-            cBright = TIER_MID_BRIGHT;
-            cMid    = TIER_MID_MID;
-            cDark   = TIER_MID_DARK;
+        // Phase 4: Extreme corruption shifts to Nightmare Red palette
+        if (corruptionLevel >= 0.85f) {
+            cBright = CORRUPT_BRIGHT;
+            cMid    = CORRUPT_MID;
+            cDark   = CORRUPT_DARK;
         } else {
-            cBright = TIER_LOW_BRIGHT;
-            cMid    = TIER_LOW_MID;
-            cDark   = TIER_LOW_DARK;
+            // Standard clean green palettes
+            if (elevation >= 0.85f) {
+                cBright = TIER_HIGH_BRIGHT;
+                cMid    = TIER_HIGH_MID;
+                cDark   = TIER_HIGH_DARK;
+            } else if (elevation >= 0.35f) {
+                cBright = TIER_MID_BRIGHT;
+                cMid    = TIER_MID_MID;
+                cDark   = TIER_MID_DARK;
+            } else {
+                cBright = TIER_LOW_BRIGHT;
+                cMid    = TIER_LOW_MID;
+                cDark   = TIER_LOW_DARK;
+            }
+        }
+
+        // Random subtle visual glitched color
+        if (corruptionLevel >= 0.4f && (rand() % 100) < int(corruptionLevel * 5)) {
+            return CORRUPT_BRIGHT;
         }
 
         if (dist < 3.0f)       return (side == 0) ? cBright : cMid;
@@ -333,6 +355,7 @@ private:
         currentLevel = 1;
         totalSteps = 0;
         levelTime = 0.0f;
+        corruptionLevel = 0.0f; // Start totally pure
         player.sanity = 100.0f;
         player.health = 100.0f;
         generateMazeWithOverpass();
@@ -343,6 +366,7 @@ private:
         audioState.inGame = true;
         audioState.sanity = 100.0f;
         audioState.monsterDist = 20.0f;
+        audioState.corruption = corruptionLevel;
         SDL_UnlockAudioDevice(audioDevice);
     }
 
@@ -350,12 +374,17 @@ private:
         currentLevel++;
         player.sanity = std::min(100.0f, player.sanity + 30.0f);
         player.health = std::min(100.0f, player.health + 30.0f);
+        
+        // Increase corruption dynamically. 0.0 -> 0.11 -> 0.22 ... -> 0.99
+        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.11f);
+        
         generateMazeWithOverpass();
         currentState = STATE_PLAYING;
         setCaptureMouse(true);
 
         SDL_LockAudioDevice(audioDevice);
         audioState.inGame = true;
+        audioState.corruption = corruptionLevel;
         SDL_UnlockAudioDevice(audioDevice);
     }
 
@@ -511,11 +540,12 @@ public:
         levelTime += dtSec;
         player.takingDamage = false;
 
-        // 1. WASD Vector Movement (Forward + Strafe)
+        // 1. Corrected WASD Vector Movement
         if (player.forward != 0 || player.strafe != 0) {
             float forwardStep = player.forward * player.moveSpeed * dtSec;
             float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec;
 
+            // Strafe vector properly inverted to map A = left, D = right
             float moveX = player.dirX * forwardStep - player.dirY * strafeStep;
             float moveY = player.dirY * forwardStep + player.dirX * strafeStep;
 
@@ -545,40 +575,44 @@ public:
             }
         }
 
-        // 2. Continuous Vertical Height Tracking
         int currTileX = int(player.posX);
         int currTileY = int(player.posY);
         player.targetPosZ = worldMap[currTileY][currTileX].floorH;
         player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
-        // 3. Stalker AI
+        // 3. Stalker AI gated by Corruption Level (Phase 3+)
         float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
 
-        if (distToMonster < 8.5f) {
-            stalker.isChasing = true;
-            float dx = (player.posX - stalker.x) / distToMonster;
-            float dy = (player.posY - stalker.y) / distToMonster;
+        if (corruptionLevel > 0.5f) {
+            if (distToMonster < 8.5f) {
+                stalker.isChasing = true;
+                float dx = (player.posX - stalker.x) / distToMonster;
+                float dy = (player.posY - stalker.y) / distToMonster;
 
-            float nx = stalker.x + dx * stalker.speed * dtSec;
-            float ny = stalker.y + dy * stalker.speed * dtSec;
+                float nx = stalker.x + dx * stalker.speed * dtSec;
+                float ny = stalker.y + dy * stalker.speed * dtSec;
 
-            if (worldMap[int(ny)][int(nx)].wallType == 0) {
-                stalker.x = nx;
-                stalker.y = ny;
-            }
+                if (worldMap[int(ny)][int(nx)].wallType == 0) {
+                    stalker.x = nx;
+                    stalker.y = ny;
+                }
 
-            player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
-            if (distToMonster < 1.1f) {
-                player.health -= 28.0f * dtSec;
-                player.takingDamage = true;
+                player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
+                if (distToMonster < 1.1f) {
+                    player.health -= 28.0f * dtSec;
+                    player.takingDamage = true;
+                }
+            } else {
+                stalker.isChasing = false;
+                player.sanity -= 0.08f * dtSec;
+                if (distToMonster > 12.0f) {
+                    player.sanity = std::min(100.0f, player.sanity + 1.0f * dtSec);
+                    player.health = std::min(100.0f, player.health + 0.8f * dtSec);
+                }
             }
         } else {
-            stalker.isChasing = false;
-            player.sanity -= 0.08f * dtSec;
-            if (distToMonster > 12.0f) {
-                player.sanity = std::min(100.0f, player.sanity + 1.0f * dtSec);
-                player.health = std::min(100.0f, player.health + 0.8f * dtSec);
-            }
+            // Early levels: No sanity drain, no monster movement
+            player.sanity = 100.0f;
         }
 
         player.sanity = std::max(0.0f, player.sanity);
@@ -673,7 +707,12 @@ public:
             else           perpWallDist = (sideDistY - deltaDistY);
             if (perpWallDist < 0.05f) perpWallDist = 0.05f;
 
-            // 1. Raycasted Textured Floor 
+            // Wall Vibration Glitch (Phase 3+)
+            int vOffset = 0;
+            if (corruptionLevel > 0.5f && (rand() % 100) < int(corruptionLevel * 20)) {
+                vOffset = (rand() % 5) - 2; 
+            }
+
             for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
                 float straightDist = (ROWS * totalPlayerZ) / p;
@@ -696,13 +735,17 @@ public:
                         floorGlyph = (sampledFloorH > 0.8f) ? '^' : '.';
                     }
 
+                    // Corruption Glyph Glitching
+                    if (corruptionLevel > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
+                        floorGlyph = "?!@#$%^&*"[rand() % 9];
+                    }
+
                     if (floorGlyph != ' ') {
-                        drawGlyph(col, r, floorGlyph, floorColor);
+                        drawGlyph(col, r + vOffset, floorGlyph, floorColor);
                     }
                 }
             }
 
-            // 2. Solid Walls
             float wallFloorH = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].floorH : 0.0f;
             float wallCeilH  = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].ceilH : 2.0f;
 
@@ -718,20 +761,21 @@ public:
             else if (perpWallDist <= 9.00f) wallGlyph = '-';
             else if (perpWallDist <= 11.0f) wallGlyph = '.';
 
-            uint32_t wallColor;
-            if (hit == 2) {
-                wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
-            } else {
-                wallColor = getElevationColor(wallFloorH, perpWallDist, side);
+            // Corruption Glyph Glitching
+            if (corruptionLevel > 0.3f && wallGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
+                wallGlyph = "?!@#$%^&*"[rand() % 9];
             }
+
+            uint32_t wallColor;
+            if (hit == 2) wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
+            else          wallColor = getElevationColor(wallFloorH, perpWallDist, side);
 
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
-                    drawGlyph(col, r, wallGlyph, wallColor);
+                    drawGlyph(col, r + vOffset, wallGlyph, wallColor);
                 }
             }
 
-            // 3. Elevation Step-Risers
             if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist) {
                 float lowH = std::min(prevFloorH, prevFloorH + stepFloorDiff);
                 float highH = std::max(prevFloorH, prevFloorH + stepFloorDiff);
@@ -744,7 +788,7 @@ public:
 
                 for (int r = stepTop; r <= stepBottom; ++r) {
                     if (r >= 0 && r < ROWS) {
-                        drawGlyph(col, r, stepGlyph, stepColor);
+                        drawGlyph(col, r + vOffset, stepGlyph, stepColor);
                     }
                 }
             }
@@ -758,6 +802,8 @@ public:
             drawText(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
+        // Live HUD - Modifies based on Corruption
+        // Live HUD - Modifies based on Corruption
         std::string elevStr;
         uint32_t elevColor;
         if (player.posZ > 0.7f) {
@@ -773,21 +819,25 @@ public:
 
         drawText(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), elevColor);
         
-        uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
-        drawText(2, 4, "HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
+        if (corruptionLevel < 0.5f) {
+            drawText(2, 4, "TEST MAZE UTILITY v1.0", TIER_LOW_BRIGHT);
+            drawText(2, 6, "SYS: CLEAN", TIER_LOW_BRIGHT);
+        } else {
+            // Unmasks health and sanity bars as corruption peaks
+            uint32_t hpCol = (player.health < 30.0f) ? RED_GOAL_BRIGHT : ((player.health < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
+            drawText(2, 4, "SYS ERR: HEALTH: " + std::to_string(int(player.health)) + "%", hpCol);
 
-        uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
-        drawText(2, 6, "SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
-
+            uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
+            drawText(2, 6, "SYS ERR: SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
+        }
+        
         if (currentDifficulty == DIFF_EASY) {
             renderSidebarMinimap();
         }
     }
 
     void renderSidebarMinimap() {
-        for (int r = 0; r < ROWS; ++r) {
-            drawGlyph(68, r, '|', 0xFF334155);
-        }
+        for (int r = 0; r < ROWS; ++r) drawGlyph(68, r, '|', 0xFF334155);
 
         int miniStartX = 72;
         int miniStartY = 3;
@@ -857,8 +907,11 @@ public:
         drawText(34, 22, "COMPLETED LEVEL:  " + std::to_string(currentLevel), 0xFFFFFFFF);
         drawText(34, 25, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFFFFFFF);
         drawText(34, 28, "TIME TAKEN:       " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
-        drawText(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", TIER_HIGH_BRIGHT);
-        drawText(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", TIER_HIGH_BRIGHT);
+        
+        if (corruptionLevel >= 0.5f) {
+            drawText(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", TIER_HIGH_BRIGHT);
+            drawText(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", TIER_HIGH_BRIGHT);
+        }
 
         drawText(28, 44, "PRESS [ENTER / SPACE] TO ADVANCE TO NEXT LEVEL", TIER_LOW_BRIGHT);
         drawText(38, 47, "PRESS [ESC] FOR MAIN MENU", 0xFF64748B);
