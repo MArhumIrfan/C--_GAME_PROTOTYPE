@@ -51,13 +51,11 @@ constexpr uint32_t THEME3_BRIGHT = 0xFF78350F;
 constexpr uint32_t THEME3_MID    = 0xFF451A03;
 constexpr uint32_t THEME3_DARK   = 0xFF1C1917;
 
-// Restored UI / Status Colors
 constexpr uint32_t TIER_HIGH_BRIGHT = 0xFF86EFAC;
 constexpr uint32_t TIER_HIGH_DARK   = 0xFF22C55E;
 constexpr uint32_t TIER_MID_BRIGHT  = 0xFF38BDF8;
 constexpr uint32_t TIER_LOW_BRIGHT  = 0xFF16A34A;
 
-// Corrupted Nightmare Palettes
 constexpr uint32_t CORRUPT_BRIGHT   = 0xFFF43F5E;
 constexpr uint32_t CORRUPT_MID      = 0xFFBE123C;
 constexpr uint32_t CORRUPT_DARK     = 0xFF881337;
@@ -71,12 +69,7 @@ constexpr int AUDIO_BUFFER_SIZE = 1024;
 enum GameState { STATE_TITLE, STATE_PLAYING, STATE_PAUSED, STATE_JUMPSCARE, STATE_SUCCESS, STATE_GAMEOVER };
 enum Difficulty { DIFF_NORMAL = 0, DIFF_EASY = 1 };
 
-enum ItemType {
-    ITEM_NONE,
-    ITEM_BREAD,
-    ITEM_MEDS,
-    ITEM_PEBBLE
-};
+enum ItemType { ITEM_NONE, ITEM_BREAD, ITEM_MEDS, ITEM_PEBBLE };
 
 struct ItemEntity {
     float x, y;
@@ -142,16 +135,10 @@ const uint8_t FONT_8X8[96][8] = {
 };
 
 struct Point { int x, y; };
-
-struct MapCell {
-    int wallType = 0; 
-    float floorH = 0.0f;
-    float ceilH = 2.0f;
-    bool isStairs = false;
-};
+struct MapCell { int wallType = 0; float floorH = 0.0f; float ceilH = 2.0f; bool isStairs = false; };
 
 // ==========================================
-// AUDIO SYSTEM (THREAD-SAFE)
+// AUDIO SYSTEM
 // ==========================================
 struct AudioState {
     float ambientPhase = 0.0f;
@@ -165,7 +152,7 @@ struct AudioState {
     float itemSoundPhase = 0.0f;
     
     float sanity = 100.0f;
-    float monsterDist = 20.0f;
+    float closestEnemyDist = 20.0f;
     float corruption = 0.0f;
     
     bool isChasing = false;
@@ -199,11 +186,9 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         if (audio->isJumpscare) {
             audio->screamPhase += (350.0f * 2.0f * 3.14159265f) * sampleDt;
             if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
-            
             float screech = std::sin(audio->screamPhase) * 0.5f;
             float rawNoise = getAudioNoise(audio->rngSeed) * 0.7f;
             float demonicRumble = std::sin(audio->screamPhase * 0.1f) * 0.4f;
-
             buffer[i] = static_cast<int16_t>(std::clamp(screech + rawNoise + demonicRumble, -1.0f, 1.0f) * 32767.0f);
             continue;
         }
@@ -218,7 +203,6 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
             float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
             audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) * sampleDt;
             if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
-            
             float stepEnv = std::max(0.0f, std::sin(audio->footstepPhase));
             stepEnv = std::pow(stepEnv, 6.0f); 
             footstep = getAudioNoise(audio->rngSeed) * stepEnv * 0.15f; 
@@ -229,7 +213,6 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
         audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) * sampleDt;
         if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
-
         float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
         float beatEnv = 0.0f;
         float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
@@ -238,12 +221,11 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
 
         float monsterAudio = 0.0f;
-        if (audio->isChasing || audio->monsterDist < 15.0f) {
-            float proxVol = std::max(0.0f, 1.0f - (audio->monsterDist / 15.0f));
+        if (audio->isChasing || audio->closestEnemyDist < 15.0f) {
+            float proxVol = std::max(0.0f, 1.0f - (audio->closestEnemyDist / 15.0f));
             float breathFreq = audio->isChasing ? 2.5f : 0.8f;
             audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) * sampleDt;
             if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
-            
             float breathEnv = std::sin(audio->monsterPhase) * 0.5f + 0.5f;
             monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixAmbient;
         }
@@ -272,10 +254,9 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
                 float wave = std::sin(t * 2.0f * 3.14159f * 100.0f);
                 itemSound = (noise * 0.4f + wave * 0.6f) * env * 0.4f;
             }
-            else if (audio->itemSoundType == 4) { // Lantern Click
+            else if (audio->itemSoundType == 4) { // Lantern
                 float env = std::exp(-t * 30.0f);
-                float noise = getAudioNoise(audio->rngSeed);
-                itemSound = noise * env * 0.6f;
+                itemSound = getAudioNoise(audio->rngSeed) * env * 0.6f;
             }
         }
 
@@ -323,7 +304,6 @@ private:
         float eyeHeight = 0.5f;
         float targetEyeHeight = 0.5f;
         float pitch = 0.0f;
-
         float dirX = 1.0f;
         float dirY = 0.0f;
         float planeX = 0.0f;
@@ -331,24 +311,35 @@ private:
         float baseMoveSpeed = 3.2f;
         float moveSpeed = 3.2f;
         float mouseSensitivity = 0.0022f;
-
         int forward = 0; 
         int strafe = 0;  
         bool isSprinting = false;
         bool isCrouching = false;
         float stepAccumulator = 0.0f;
-        
         float sanity = 100.0f;
         float health = 100.0f;
         bool takingDamage = false;
-
         ItemType inventory[3] = {ITEM_NONE, ITEM_NONE, ITEM_NONE};
         float toxicTimer = 0.0f;
-        
         bool lanternOn = false;
         bool lanternBroken = false;
         int reigniteClicks = 0;
     } player;
+
+    struct Enemy {
+        float x = 12.5f;
+        float y = 12.5f;
+        float speed = 1.8f;
+        bool active = false;
+        int mode = 0; // 0=Off, 1=Watcher, 2=Hunter
+        bool isChasing = false;
+        float animTimer = 0.0f;
+        int currentFrame = 0;
+        float enragedTimer = 0.0f; 
+        float investigateX = 0.0f;
+        float investigateY = 0.0f;
+        float investigateTimer = 0.0f;
+    } stalker, mistEnemy;
 
     const std::vector<std::string> spriteBread = {
         "          .-\"\"\"\"\"\"\"\"\"\"\"\"-.          ",
@@ -419,98 +410,133 @@ private:
         "     \"-_\\_______/;;'              "
     };
 
-    struct Monster {
-        float x = 12.5f;
-        float y = 12.5f;
-        float speed = 1.8f;
-        
-        int mode = 0; 
-        bool isChasing = false;
-        
-        float animTimer = 0.0f;
-        int currentFrame = 0;
-        float enragedTimer = 0.0f; 
-        
-        float investigateX = 0.0f;
-        float investigateY = 0.0f;
-        float investigateTimer = 0.0f;
+    // THE STALKER (Tall Figure)
+    const std::vector<std::string> spriteStalker0 = {
+        "                                                                   ",
+        "                                                         .:-::....         .::.                                          ",
+        "                              ..::----===========+++====+++++++:                                         ",
+        "                            :-==++*##***+====. :=+*##%%%%######*#*+                                      ",
+        "                       .::-==+#@@@@@@@@@#+-     :%@@@@@@@@@@%%#####* .                                   ",
+        "                       -==+*%@@@@@@@@@@@@%-      =@@@@@@@@@@@@@@@%%**=.                                   ",
+        "                       -+*#@@@@@@@@@@@@@@#       -@@@@@@@@@@@@@@%#*++=:.                                  ",
+        "                        :=#@@@@@@@@@@@@#.       :#@@@@@@@@@@@@%*+-:.::-.                                 ",
+        "                           =#@@@@@@@@%+.        .+-:+%@@@@@*-.     ..:-                                  ",
+        "                              :======:           ==.  .              ..:                                 ",
+        "                                                 :+:                 .:-                                 ",
+        "                                                 .:.               ..--* .                               ",
+        "                                        ::.   :=*#+#+              .:-+*                                 ",
+        "                                       :=*#=:--+%@@%+             .:-+**=                                ",
+        "                                             :-#@%%#*=:           .:=+###                                ",
+        "                                                 :+*+:      ......:--+*%%%-                               ",
+        "                                        .-+-.   :**:   .:...::-::::=+#%%%#                               ",
+        "                                      -+%%==*#%%%@@%#*=---::--=----=*#%%%@                               ",
+        "                                   .=+@- :=+ :*:-###@@%***=:=======+*%@@%@                               ",
+        "                                  -*#-          :-=%@@@###*-++++=++*#%@@%*                               ",
+        "                         .       :%%  .:*@%%@%==%-=+ @@@*#%*++++++*#%@@@%                                ",
+        "                        .        #@@@@@@@@@@@@@@@@@@@@@#=%%%+++++*%@@@@%.                                ",
+        "                         ..     :@@@@@@@@@@@@@@@@@@@@@@%-#%%#+**#%@@@@@#                                 ",
+        "                         ..     +@@@@@@@@@@@@@@@@@@@@@@@-#%%%#*#%@@@@@@                                  ",
+        "                   .      .     *@@@@@@@@@@@@@@@@@@@@@@@:%@@%%#%%@@@@@                                   ",
+        "                     -    .     +@@@@@@%@@@@@@@@@@@@@@@@:@%@%%%%@%@%#                                    ",
+        "                          .     .@@@@%#@@@@@@@@@@@@@@@@+-@%%%%%@@%=                                      ",
+        "                                 @@@@@@@@@@@@@@@@@@@@@@ +@%%#=#@@                                        ",
+        "                                  @@@@@+*@@@@@@@@@@@@%: #%%%+=%@                                         ",
+        "                                  . =+*@@@@@@@@@@@% =  .%%#%=+%                                          ",
+        "                                         -*%*+.   +=*  *@%%%--                                           ",
+        "                                      : -+==+++++*%   *@%%@*                                             ",
+        "                                 .=:      .=*+-:    -%@%%                                                ",
+        "                                   :**=:        -+%@@+                                                   ",
+        "                                        .-+**##=                                                         "
+    };
 
-        const std::vector<std::string> frame0 = {
-            "                                                                   ",
-            "                                                         .:-::....         .::.                                          ",
-            "                              ..::----===========+++====+++++++:                                         ",
-            "                            :-==++*##***+====. :=+*##%%%%######*#*+                                      ",
-            "                       .::-==+#@@@@@@@@@#+-     :%@@@@@@@@@@%%#####* .                                   ",
-            "                       -==+*%@@@@@@@@@@@@%-      =@@@@@@@@@@@@@@@%%**=.                                   ",
-            "                       -+*#@@@@@@@@@@@@@@#       -@@@@@@@@@@@@@@%#*++=:.                                  ",
-            "                        :=#@@@@@@@@@@@@#.       :#@@@@@@@@@@@@%*+-:.::-.                                 ",
-            "                           =#@@@@@@@@%+.        .+-:+%@@@@@*-.     ..:-                                  ",
-            "                              :======:           ==.  .              ..:                                 ",
-            "                                                 :+:                 .:-                                 ",
-            "                                                 .:.               ..--* .                               ",
-            "                                        ::.   :=*#+#+              .:-+*                                 ",
-            "                                       :=*#=:--+%@@%+             .:-+**=                                ",
-            "                                             :-#@%%#*=:           .:=+###                                ",
-            "                                                 :+*+:      ......:--+*%%%-                               ",
-            "                                        .-+-.   :**:   .:...::-::::=+#%%%#                               ",
-            "                                      -+%%==*#%%%@@%#*=---::--=----=*#%%%@                               ",
-            "                                   .=+@- :=+ :*:-###@@%***=:=======+*%@@%@                               ",
-            "                                  -*#-          :-=%@@@###*-++++=++*#%@@%*                               ",
-            "                         .       :%%  .:*@%%@%==%-=+ @@@*#%*++++++*#%@@@%                                ",
-            "                        .        #@@@@@@@@@@@@@@@@@@@@@#=%%%+++++*%@@@@%.                                ",
-            "                         ..     :@@@@@@@@@@@@@@@@@@@@@@%-#%%#+**#%@@@@@#                                 ",
-            "                         ..     +@@@@@@@@@@@@@@@@@@@@@@@-#%%%#*#%@@@@@@                                  ",
-            "                   .      .     *@@@@@@@@@@@@@@@@@@@@@@@:%@@%%#%%@@@@@                                   ",
-            "                     -    .     +@@@@@@%@@@@@@@@@@@@@@@@:@%@%%%%@%@%#                                    ",
-            "                          .     .@@@@%#@@@@@@@@@@@@@@@@+-@%%%%%@@%=                                      ",
-            "                                 @@@@@@@@@@@@@@@@@@@@@@ +@%%#=#@@                                        ",
-            "                                  @@@@@+*@@@@@@@@@@@@%: #%%%+=%@                                         ",
-            "                                  . =+*@@@@@@@@@@@% =  .%%#%=+%                                          ",
-            "                                         -*%*+.   +=*  *@%%%--                                           ",
-            "                                      : -+==+++++*%   *@%%@*                                             ",
-            "                                 .=:      .=*+-:    -%@%%                                                ",
-            "                                   :**=:        -+%@@+                                                   ",
-            "                                        .-+**##=                                                         "
-        };
+    const std::vector<std::string> spriteStalker1 = {
+        "                                                                   ",
+        "                                                         .::-::....         .::.                                          ",
+        "                              ..::----===========+++====+++++++:                                         ",
+        "                            :-==++*##***+====. :=+*##%%%%######*#*+                                      ",
+        "                       .::-==+#@@@@@@@@@#+-     :%@@@@@@@@@@%%#####* .                                   ",
+        "                       -==+*%@@@@@@@@@@@@%-      =@@@@@@@@@@@@@@@%%**=.                                   ",
+        "                       -+*#@@@@@@@@@@@@@@#       -@@@@@@@@@@@@@@%#*++=:.                                  ",
+        "                        :=#@@@@@@@@@@@@#.       :#@@@@@@@@@@@@%*+-:.::-.                                 ",
+        "                           =#@@@@@@@@%+.        .+-:+%@@@@@*-.     ..:-                                  ",
+        "                              :======:           ==.  .              ..:                                 ",
+        "                                                 :+:                 .:-                                 ",
+        "                                                 .:.               ..--* .                               ",
+        "                                        ::.   :=*#+#+              .:-+*                                 ",
+        "                                       :=*#=:--+%@@%+             .:-+**=                                ",
+        "                                             :-#@%%#*=:           .:=+###                                ",
+        "                                                 :+*+:      ......::-+*%%%-                               ",
+        "                                        .-+-.   :**:   .:...::-::::=+#%%%#                               ",
+        "                                      -+%%==*#%%%@@%#*=---::--=----=*#%%%@                               ",
+        "                                   .=+@- :=+ :*:-###@@%***=:=======+*%@@%@                               ",
+        "                                  -*#-          :-=%@@@###*-++++=++*#%@@%*                               ",
+        "                         .       :%%  .:*@%%@%==%-=+ @@@*#%*++++++*#%@@@%                                ",
+        "                        .        #@@@@@@@@@@@@@@@@@@@@@#=%%%+++++*%@@@@%.                                ",
+        "                         ..     :@@@@@@@@@@@@@@@@@@@@@@%-#%%#+**#%@@@@@#                                 ",
+        "                         ..     +@@@@@@@@@@@@@@@@@@@@@@@-#%%%#*#%@@@@@@                                  ",
+        "                   .      .     *@@@@@@@@@@@@@@@@@@@@@@@:%@@%%#%%@@@@@                                   ",
+        "                     -    .     +@@@@@@%@@@@@@@@@@@@@@@@:@%@%%%%@%@%#                                    ",
+        "                          .     .@@@@%#@@@@@@@@@@@@@@@@+-@%%%%%@@%=                                      ",
+        "                                 @@@@@@@@@@@@@@@@@@@@@@ +@%%#=#@@                                        ",
+        "                                  @@@@@+*@@@@@@@@@@@@%: #%%%+=%@                                         ",
+        "                                  . =+*@@@@@@@@@@@% =  .%%#%=+%                                          ",
+        "                                         -*%*+.   +=*  *@%%%--                                           ",
+        "                                      : -+==+++++*%   *@%%@*                                             ",
+        "                                 .=:      .=*+-:    -%@%%                                                ",
+        "                                   :**=:        -+%@@+                                                   ",
+        "                                        .-+**##=                                                         "
+    };
 
-        const std::vector<std::string> frame1 = {
-            "                                                                   ",
-            "                                                         .::-::....         .::.                                          ",
-            "                              ..::----===========+++====+++++++:                                         ",
-            "                            :-==++*##***+====. :=+*##%%%%######*#*+                                      ",
-            "                       .::-==+#@@@@@@@@@#+-     :%@@@@@@@@@@%%#####* .                                   ",
-            "                       -==+*%@@@@@@@@@@@@%-      =@@@@@@@@@@@@@@@%%**=.                                   ",
-            "                       -+*#@@@@@@@@@@@@@@#       -@@@@@@@@@@@@@@%#*++=:.                                  ",
-            "                        :=#@@@@@@@@@@@@#.       :#@@@@@@@@@@@@%*+-:.::-.                                 ",
-            "                           =#@@@@@@@@%+.        .+-:+%@@@@@*-.     ..:-                                  ",
-            "                              :======:           ==.  .              ..:                                 ",
-            "                                                 :+:                 .:-                                 ",
-            "                                                 .:.               ..--* .                               ",
-            "                                        ::.   :=*#+#+              .:-+*                                 ",
-            "                                       :=*#=:--+%@@%+             .:-+**=                                ",
-            "                                             :-#@%%#*=:           .:=+###                                ",
-            "                                                 :+*+:      ......::-+*%%%-                               ",
-            "                                        .-+-.   :**:   .:...::-::::=+#%%%#                               ",
-            "                                      -+%%==*#%%%@@%#*=---::--=----=*#%%%@                               ",
-            "                                   .=+@- :=+ :*:-###@@%***=:=======+*%@@%@                               ",
-            "                                  -*#-          :-=%@@@###*-++++=++*#%@@%*                               ",
-            "                         .       :%%  .:*@%%@%==%-=+ @@@*#%*++++++*#%@@@%                                ",
-            "                        .        #@@@@@@@@@@@@@@@@@@@@@#=%%%+++++*%@@@@%.                                ",
-            "                         ..     :@@@@@@@@@@@@@@@@@@@@@@%-#%%#+**#%@@@@@#                                 ",
-            "                         ..     +@@@@@@@@@@@@@@@@@@@@@@@-#%%%#*#%@@@@@@                                  ",
-            "                   .      .     *@@@@@@@@@@@@@@@@@@@@@@@:%@@%%#%%@@@@@                                   ",
-            "                     -    .     +@@@@@@%@@@@@@@@@@@@@@@@:@%@%%%%@%@%#                                    ",
-            "                          .     .@@@@%#@@@@@@@@@@@@@@@@+-@%%%%%@@%=                                      ",
-            "                                 @@@@@@@@@@@@@@@@@@@@@@ +@%%#=#@@                                        ",
-            "                                  @@@@@+*@@@@@@@@@@@@%: #%%%+=%@                                         ",
-            "                                  . =+*@@@@@@@@@@@% =  .%%#%=+%                                          ",
-            "                                         -*%*+.   +=*  *@%%%--                                           ",
-            "                                      : -+==+++++*%   *@%%@*                                             ",
-            "                                 .=:      .=*+-:    -%@%%                                                ",
-            "                                   :**=:        -+%@@+                                                   ",
-            "                                        .-+**##=                                                         "
-        };
-    } stalker;
+    // THE MIST (Skull Cloud)
+    const std::vector<std::string> spriteMist0 = {
+        "               __,aaPPPPPPPPaa,__               ",
+        "           ,adP\"\"\"'          `\"\"Yb,_            ",
+        "        ,adP'                     `\"Yb,         ",
+        "      ,dP'     ,aadPP\"\"\"\"\"YYba,_     `\"Y,       ",
+        "     ,P'    ,aP\"'            `\"\"Ya,     \"Y,     ",
+        "    ,P'    aP'     _________     `\"Ya    `Yb,   ",
+        "   ,P'    d\"    ,adP\"\"\"\"\"\"\"\"Yba,    `Y,    \"Y,  ",
+        "  ,d'   ,d'   ,dP\"            `Yb,   `Y,    `Y, ",
+        "  d'   ,d'   ,d'    ,dP\"\"Yb,    `Y,   `Y,    `b ",
+        "  8    d'    d'   ,d\"      \"b,   `Y,   `8,    Y,",
+        "  8    8     8    d'    _   `Y,   `8    `8    `b",
+        "  8    8     8    8     8    `8    8     8     8",
+        "  8    Y,    Y,   `b, ,aP     P    8    ,P     8",
+        "  I,   `Y,   `Ya    \"\"\"\"     d'   ,P    d\"    ,P",
+        "  `Y,   `8,    `Ya         ,8\"   ,P'   ,P'    d'",
+        "   `Y,   `Ya,    `Ya,,__,,d\"'   ,P'   ,P\"    ,P ",
+        "    `Y,    `Ya,     `\"\"\"\"'     ,P'   ,d\"    ,P' ",
+        "     `Yb,    `\"Ya,_          ,d\"    ,P'    ,P'  ",
+        "       `Yb,      \"\"YbaaaaaadP\"     ,P'    ,P'   ",
+        "         `Yba,                   ,d'    ,dP'    ",
+        "            `\"Yba,__       __,adP\"     dP\"      ",
+        "                `\"\"\"\"\"\"\"\"\"\"\"\"\"'                 "
+    };
+
+    const std::vector<std::string> spriteMist1 = {
+        "                                                ",
+        "               __,aaPPPPPPPPaa,__               ",
+        "           ,adP\"\"\"'          `\"\"Yb,_            ",
+        "        ,adP'                     `\"Yb,         ",
+        "      ,dP'     ,aadPP\"\"\"\"\"YYba,_     `\"Y,       ",
+        "     ,P'    ,aP\"'            `\"\"Ya,     \"Y,     ",
+        "    ,P'    aP'     _________     `\"Ya    `Yb,   ",
+        "   ,P'    d\"    ,adP\"\"\"\"\"\"\"\"Yba,    `Y,    \"Y,  ",
+        "  ,d'   ,d'   ,dP\"            `Yb,   `Y,    `Y, ",
+        "  d'   ,d'   ,d'    ,dP\"\"Yb,    `Y,   `Y,    `b ",
+        "  8    d'    d'   ,d\"      \"b,   `Y,   `8,    Y,",
+        "  8    8     8    d'    _   `Y,   `8    `8    `b",
+        "  8    8     8    8     8    `8    8     8     8",
+        "  8    Y,    Y,   `b, ,aP     P    8    ,P     8",
+        "  I,   `Y,   `Ya    \"\"\"\"     d'   ,P    d\"    ,P",
+        "  `Y,   `8,    `Ya         ,8\"   ,P'   ,P'    d'",
+        "   `Y,   `Ya,    `Ya,,__,,d\"'   ,P'   ,P\"    ,P ",
+        "    `Y,    `Ya,     `\"\"\"\"'     ,P'   ,d\"    ,P' ",
+        "     `Yb,    `\"Ya,_          ,d\"    ,P'    ,P'  ",
+        "       `Yb,      \"\"YbaaaaaadP\"     ,P'    ,P'   ",
+        "         `Yba,                   ,d'    ,dP'    ",
+        "            `\"Yba,__       __,adP\"     dP\"      "
+    };
 
     std::string getCurrentThemeName() {
         int theme = (currentLevel - 1) % 4;
@@ -533,17 +559,53 @@ private:
         SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
     }
 
-    void moveStalkerToward(float dx, float dy, float dtSec) {
-        float moveX = dx * stalker.speed * dtSec;
-        float moveY = dy * stalker.speed * dtSec;
+    void moveEnemyToward(Enemy& e, float dx, float dy, float dtSec) {
+        float moveX = dx * e.speed * dtSec;
+        float moveY = dy * e.speed * dtSec;
 
-        int curTileX = std::clamp(int(stalker.x), 0, MAP_W - 1);
-        int curTileY = std::clamp(int(stalker.y), 0, MAP_H - 1);
-        int nextTileX = std::clamp(int(stalker.x + moveX), 0, MAP_W - 1);
-        int nextTileY = std::clamp(int(stalker.y + moveY), 0, MAP_H - 1);
+        int curTileX = std::clamp(int(e.x), 0, MAP_W - 1);
+        int curTileY = std::clamp(int(e.y), 0, MAP_H - 1);
+        int nextTileX = std::clamp(int(e.x + moveX), 0, MAP_W - 1);
+        int nextTileY = std::clamp(int(e.y + moveY), 0, MAP_H - 1);
 
-        if (worldMap[curTileY][nextTileX].wallType == 0) stalker.x += moveX;
-        if (worldMap[nextTileY][curTileX].wallType == 0) stalker.y += moveY;
+        if (worldMap[curTileY][nextTileX].wallType == 0) e.x += moveX;
+        if (worldMap[nextTileY][curTileX].wallType == 0) e.y += moveY;
+    }
+
+    uint32_t applyShadow(uint32_t hexColor, float brightness) {
+        brightness = std::clamp(brightness, 0.0f, 1.0f);
+        uint32_t a = (hexColor >> 24) & 0xFF;
+        uint32_t r = static_cast<uint32_t>(((hexColor >> 16) & 0xFF) * brightness);
+        uint32_t g = static_cast<uint32_t>(((hexColor >> 8) & 0xFF) * brightness);
+        uint32_t b = static_cast<uint32_t>((hexColor & 0xFF) * brightness);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    float calculateVisibility(int col, int row, float dist, int viewWidth, float pitch) {
+        if (currentLevel < 2) return 1.0f; 
+
+        float lightCenterY = (ROWS / 2.0f) - (pitch * 0.5f); 
+        float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
+        float cameraY = 2.0f * (row - lightCenterY) / float(ROWS);
+        float aspect = (float)viewWidth / (float)ROWS;
+        float spotRadius = std::hypot(cameraX * aspect, cameraY);
+        
+        if (player.lanternOn) {
+            if (spotRadius > 0.9f || dist > 14.0f) return 0.0f;
+            float edgeFade = std::clamp(1.0f - ((spotRadius - 0.6f) * 3.3f), 0.0f, 1.0f);
+            float distFade = 1.0f / (1.0f + 0.15f * dist + 0.3f * dist * dist);
+            distFade = std::clamp(distFade * 1.5f, 0.0f, 1.0f); 
+            float flicker = 1.0f - ((rand() % 100) / 100.0f) * 0.05f;
+            return edgeFade * distFade * flicker;
+        } else {
+            if (dist > 1.2f) return 0.0f;
+            float distFade = std::clamp(1.0f - (dist / 1.2f), 0.0f, 1.0f);
+            return distFade;
+        }
+    }
+
+    bool isPixelVisible(int col, int row, float dist, int viewWidth, float pitch) {
+        return calculateVisibility(col, row, dist, viewWidth, pitch) > 0.02f;
     }
 
     uint32_t getElevationColor(float elevation, float dist, int side) {
@@ -566,29 +628,6 @@ private:
         else                   return cDark;
     }
 
-    // ==========================================
-    // VISIBILITY MATH (THE SPOTLIGHT FOG)
-    // ==========================================
-    bool isPixelVisible(int col, int row, float dist, int horizon, int viewWidth) {
-        if (currentLevel < 2) return true; 
-        
-        float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
-        float cameraY = 2.0f * (row - horizon) / float(ROWS);
-        float aspect = (float)viewWidth / (float)ROWS;
-        float spotRadius = std::hypot(cameraX * aspect, cameraY);
-        
-        if (player.lanternOn) {
-            if (spotRadius > 0.85f || dist > 14.0f) return false;
-            if (spotRadius > 0.70f && (rand() % 100) < ((spotRadius - 0.70f) * 600.0f)) return false;
-            return true;
-        } else {
-            // Pitch black, only see absolute immediate proximity (practically touching)
-            if (dist > 0.8f) return false; 
-            if (dist > 0.3f && (rand() % 100) < ((dist - 0.3f) * 200.0f)) return false; 
-            return true;
-        }
-    }
-
     bool isMapVisible(float mapX, float mapY) {
         if (currentLevel < 2) return true; 
         
@@ -596,16 +635,13 @@ private:
         float dy = mapY - player.posY;
         float dist = std::hypot(dx, dy);
         
-        // Base vision without lantern
-        if (dist <= 0.8f) return true; 
+        if (dist <= 1.2f) return true; 
         
-        // Spotlight cone logic
         if (player.lanternOn && dist <= 14.0f) {
             float angle = std::atan2(dy, dx);
             float pAngle = std::atan2(player.dirY, player.dirX);
             float diff = std::abs(std::atan2(std::sin(angle - pAngle), std::cos(angle - pAngle)));
             if (diff > 3.14159f) diff = 2.0f * 3.14159f - diff; 
-            
             if (diff <= 0.5f) return true; 
         }
         return false;
@@ -756,19 +792,33 @@ private:
 
         stalker.x = MAP_W / 2 + 0.5f;
         stalker.y = MAP_H / 2 + 0.5f;
+        stalker.active = false;
+        stalker.mode = 0;
         stalker.isChasing = false;
         stalker.enragedTimer = 0.0f;
         stalker.investigateTimer = 0.0f;
+
+        mistEnemy.x = MAP_W / 2 + 0.5f;
+        mistEnemy.y = MAP_H / 2 + 0.5f;
+        mistEnemy.active = false;
+        mistEnemy.mode = 0;
+        mistEnemy.isChasing = false;
         
+        // ESCALATION AI
         if (currentLevel <= 5) {
             corruptionLevel = 0.0f;
-            stalker.mode = 0; 
+        } else if (currentLevel <= 11) {
+            corruptionLevel = std::min(1.0f, (currentLevel - 5) * 0.1f);
+            stalker.active = (rand() % 100 < 30);
+            stalker.mode = 1; // Watcher
         } else if (currentLevel <= 15) {
             corruptionLevel = std::min(1.0f, (currentLevel - 5) * 0.1f);
-            stalker.mode = (rand() % 100 < 30) ? 1 : 0; 
+            mistEnemy.active = true;
+            mistEnemy.mode = 1; // Passive toxic fog
         } else {
             corruptionLevel = 1.0f;
-            stalker.mode = 2; 
+            stalker.active = true;
+            stalker.mode = 2; // Hunter
         }
     }
 
@@ -790,7 +840,7 @@ private:
         audioState.inGame = true;
         audioState.isJumpscare = false;
         audioState.sanity = 100.0f;
-        audioState.monsterDist = 20.0f;
+        audioState.closestEnemyDist = 20.0f;
         audioState.corruption = corruptionLevel;
         SDL_UnlockAudioDevice(audioDevice);
     }
@@ -1061,7 +1111,7 @@ public:
                                     SDL_UnlockAudioDevice(audioDevice);
                                 } else if (type == ITEM_BREAD) {
                                     player.health = std::min(100.0f, player.health + 40.0f);
-                                    stalker.enragedTimer = 10.0f; 
+                                    if (stalker.active && stalker.mode == 2) stalker.enragedTimer = 10.0f; 
                                 } else if (type == ITEM_MEDS) {
                                     player.sanity = std::min(100.0f, player.sanity + 50.0f);
                                     player.health -= 15.0f;       
@@ -1074,6 +1124,16 @@ public:
                     else if (event.key.keysym.sym >= SDLK_F2 && event.key.keysym.sym <= SDLK_F10) {
                         currentLevel = event.key.keysym.sym - SDLK_F1 + 1;
                         generateProceduralMultiLevelMaze();
+                    }
+                    else if (event.key.keysym.sym == SDLK_PAGEUP) {
+                        currentLevel++;
+                        generateProceduralMultiLevelMaze();
+                    }
+                    else if (event.key.keysym.sym == SDLK_PAGEDOWN) {
+                        if (currentLevel > 1) {
+                            currentLevel--;
+                            generateProceduralMultiLevelMaze();
+                        }
                     }
                 }
                 else if (currentState == STATE_PAUSED) {
@@ -1228,7 +1288,7 @@ public:
             proj.vz -= 15.0f * dtSec; 
             proj.z += proj.vz * dtSec;
 
-            if (stalker.mode > 0) {
+            if (stalker.active && stalker.mode > 0) {
                 float distToProj = std::hypot(proj.x - stalker.x, proj.y - stalker.y);
                 if (distToProj < 0.8f && proj.z < 2.0f) {
                     if (stalker.mode == 1) stalker.mode = 2; 
@@ -1252,7 +1312,7 @@ public:
 
                 if (proj.type == ITEM_PEBBLE) {
                     itemsInWorld.push_back({proj.x, proj.y, ITEM_PEBBLE}); 
-                    if (stalker.mode > 0 && stalker.enragedTimer <= 0.0f) {
+                    if (stalker.active && stalker.mode > 0 && stalker.enragedTimer <= 0.0f) {
                         stalker.investigateX = proj.x;
                         stalker.investigateY = proj.y;
                         stalker.investigateTimer = 5.0f; 
@@ -1265,8 +1325,40 @@ public:
         
         activeProjectiles.erase(std::remove_if(activeProjectiles.begin(), activeProjectiles.end(), [](const Projectile& p){ return !p.active; }), activeProjectiles.end());
 
-        if (stalker.mode > 0) {
+        // ==========================================
+        // ENEMY AI LOGIC
+        // ==========================================
+        float closestDist = 20.0f;
+
+        if (mistEnemy.active) {
+            float distToMonster = std::hypot(player.posX - mistEnemy.x, player.posY - mistEnemy.y);
+            closestDist = std::min(closestDist, distToMonster);
+            
+            if (distToMonster < 10.0f) {
+                player.health -= 4.0f * dtSec;
+                player.sanity -= 2.0f * dtSec;
+                player.takingDamage = true;
+            }
+
+            float targetDist = 8.0f;
+            if (distToMonster < targetDist - 1.0f) {
+                float dx = (mistEnemy.x - player.posX) / distToMonster;
+                float dy = (mistEnemy.y - player.posY) / distToMonster;
+                moveEnemyToward(mistEnemy, dx, dy, dtSec);
+                mistEnemy.animTimer += dtSec;
+                if (mistEnemy.animTimer > 0.35f) { mistEnemy.currentFrame = 1 - mistEnemy.currentFrame; mistEnemy.animTimer = 0.0f; }
+            } else if (distToMonster > targetDist + 1.0f) {
+                float dx = (player.posX - mistEnemy.x) / distToMonster;
+                float dy = (player.posY - mistEnemy.y) / distToMonster;
+                moveEnemyToward(mistEnemy, dx, dy, dtSec);
+                mistEnemy.animTimer += dtSec;
+                if (mistEnemy.animTimer > 0.35f) { mistEnemy.currentFrame = 1 - mistEnemy.currentFrame; mistEnemy.animTimer = 0.0f; }
+            }
+        }
+
+        if (stalker.active && stalker.mode > 0) {
             float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
+            closestDist = std::min(closestDist, distToMonster);
 
             bool playerMakingNoise = (player.forward != 0 || player.strafe != 0) && !player.isCrouching;
             float noiseRadius = player.isSprinting ? 14.0f : (playerMakingNoise ? 6.0f : 1.5f);
@@ -1308,7 +1400,7 @@ public:
 
                     float dx = (player.posX - stalker.x) / distToMonster;
                     float dy = (player.posY - stalker.y) / distToMonster;
-                    moveStalkerToward(dx, dy, dtSec);
+                    moveEnemyToward(stalker, dx, dy, dtSec);
 
                     player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
                     if (distToMonster < 0.75f) {
@@ -1333,7 +1425,7 @@ public:
 
                         float dx = (stalker.investigateX - stalker.x) / distToTarget;
                         float dy = (stalker.investigateY - stalker.y) / distToTarget;
-                        moveStalkerToward(dx, dy, dtSec);
+                        moveEnemyToward(stalker, dx, dy, dtSec);
                     }
                 } 
                 else {
@@ -1352,26 +1444,26 @@ public:
                         if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
                         float dx = (stalker.investigateX - stalker.x) / distToTarget;
                         float dy = (stalker.investigateY - stalker.y) / distToTarget;
-                        moveStalkerToward(dx, dy, dtSec);
+                        moveEnemyToward(stalker, dx, dy, dtSec);
                     }
                 } 
                 else if (distToMonster < targetDist - 2.0f) {
                     float dx = (stalker.x - player.posX) / distToMonster;
                     float dy = (stalker.y - player.posY) / distToMonster;
-                    moveStalkerToward(dx, dy, dtSec);
+                    moveEnemyToward(stalker, dx, dy, dtSec);
                     stalker.animTimer += dtSec;
                     if (stalker.animTimer > 0.35f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
                 } 
                 else if (distToMonster > targetDist + 2.0f && noticedPlayer) {
                     float dx = (player.posX - stalker.x) / distToMonster;
                     float dy = (player.posY - stalker.y) / distToMonster;
-                    moveStalkerToward(dx, dy, dtSec);
+                    moveEnemyToward(stalker, dx, dy, dtSec);
                     stalker.animTimer += dtSec;
                     if (stalker.animTimer > 0.35f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
                 }
 
                 if (distToMonster < 1.0f) {
-                    stalker.mode = 0; 
+                    stalker.active = false; // Vanishes
                 }
             }
         }
@@ -1384,7 +1476,11 @@ public:
             currentState = STATE_GAMEOVER;
             setCaptureMouse(false);
         } else if (player.health <= 0.0f) {
-            deathReason = "SLAIN BY THE STALKER (HEALTH DEPLETED)";
+            if (mistEnemy.active) {
+                deathReason = "DIED BECAUSE OF SUFFOCATION OF THE MIST";
+            } else {
+                deathReason = "SLAIN BY THE STALKER (HEALTH DEPLETED)";
+            }
             currentState = STATE_GAMEOVER;
             setCaptureMouse(false);
         } else if (standingX == endPos.x && standingY == endPos.y) {
@@ -1402,8 +1498,8 @@ public:
         SDL_LockAudioDevice(audioDevice);
         float activeCorr = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
         audioState.sanity = player.sanity;
-        audioState.monsterDist = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
-        audioState.isChasing = stalker.isChasing && (stalker.mode > 0);
+        audioState.closestEnemyDist = closestDist;
+        audioState.isChasing = (stalker.active && stalker.isChasing);
         audioState.corruption = activeCorr;
         audioState.isMoving = (player.forward != 0 || player.strafe != 0);
         audioState.isSprinting = player.isSprinting;
@@ -1411,205 +1507,10 @@ public:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    void renderItems(const std::vector<float>& zBuffer, float maxVis) {
-        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
-        
-        std::vector<std::pair<float, ItemEntity>> sortedItems;
-        for(const auto& it : itemsInWorld) {
-            float dist = std::pow(player.posX - it.x, 2) + std::pow(player.posY - it.y, 2);
-            sortedItems.push_back({dist, it});
-        }
-        std::sort(sortedItems.begin(), sortedItems.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-
-        for(const auto& pair : sortedItems) {
-            const ItemEntity& item = pair.second;
-            float spriteX = item.x - player.posX;
-            float spriteY = item.y - player.posY;
-
-            float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
-            float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
-            float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
-
-            if (transformY <= 0.2f || transformY > maxVis) continue;
-
-            int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
-            float floorH = worldMap[int(item.y)][int(item.x)].floorH;
-            float totalPlayerZ = player.posZ + player.eyeHeight;
-            int horizon = int(ROWS / 2 + player.pitch);
-            
-            int screenY = horizon - int(((floorH - totalPlayerZ) * ROWS) / transformY);
-            
-            const std::vector<std::string>* activeSpritePtr = &spriteBread;
-            if (item.type == ITEM_MEDS) activeSpritePtr = &spriteMeds;
-            else if (item.type == ITEM_PEBBLE) activeSpritePtr = &spritePebble;
-
-            const auto& activeSprite = *activeSpritePtr;
-            int rowCount = activeSprite.size();
-            int colCount = activeSprite[0].size();
-            
-            float heightDivisor = (item.type == ITEM_PEBBLE) ? 4.0f : 1.5f; 
-            int spriteHeight = std::abs(int(ROWS / transformY / heightDivisor)); 
-            if (spriteHeight == 0) continue;
-            
-            float aspectMultiplier = 0.50f; 
-            float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
-            int spriteWidth = int(spriteHeight * aspect);
-
-            int drawStartY = screenY - spriteHeight;
-            int drawEndY = screenY;
-            int drawStartX = screenX - spriteWidth / 2;
-            int drawEndX = screenX + spriteWidth / 2;
-
-            uint32_t color = (item.type == ITEM_BREAD) ? 0xFFF59E0B : ((item.type == ITEM_MEDS) ? 0xFF06B6D4 : 0xFF94A3B8);
-            int vOffset = (player.toxicTimer > 0.0f) ? (rand() % 5) - 2 : 0;
-
-            for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
-                if (stripe < 0 || stripe >= viewWidth || transformY > zBuffer[stripe]) continue;
-                int texX = int((stripe - drawStartX) * colCount / spriteWidth);
-                if (texX < 0 || texX >= colCount) continue;
-
-                for (int y = drawStartY; y < drawEndY; ++y) {
-                    if (y < 0 || y >= ROWS) continue;
-                    if (!isPixelVisible(stripe, y, transformY, horizon, viewWidth)) continue;
-
-                    int texY = int((y - drawStartY) * rowCount / spriteHeight);
-                    if (texY < 0 || texY >= rowCount) continue;
-
-                    char glyph = activeSprite[texY][texX];
-                    
-                    if (glyph != ' ') {
-                        drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
-                        drawGlyphFine(stripe, y + vOffset, glyph, color);
-                    } else {
-                        bool nearGlyph = false;
-                        for (int dy = -1; dy <= 1; ++dy) {
-                            for (int dx = -1; dx <= 1; ++dx) {
-                                if (dx == 0 && dy == 0) continue;
-                                int ny = texY + dy; int nx = texX + dx;
-                                if (ny >= 0 && ny < rowCount && nx >= 0 && nx < colCount) {
-                                    char n = activeSprite[ny][nx];
-                                    if (n != ' ') { nearGlyph = true; break; }
-                                }
-                            }
-                            if (nearGlyph) break;
-                        }
-                        if (nearGlyph) drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
-                    }
-                }
-            }
-        }
-        
-        for (const auto& proj : activeProjectiles) {
-            float spriteX = proj.x - player.posX;
-            float spriteY = proj.y - player.posY;
-            float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
-            float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
-            float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
-
-            if (transformY > 0.2f && transformY <= maxVis) {
-                int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
-                float totalPlayerZ = player.posZ + player.eyeHeight;
-                int horizon = int(ROWS / 2 + player.pitch);
-                int screenY = horizon - int(((proj.z - totalPlayerZ) * ROWS) / transformY);
-                if (screenX >= 0 && screenX < viewWidth && transformY <= zBuffer[screenX] && screenY >= 0 && screenY < ROWS) {
-                    if (isPixelVisible(screenX, screenY, transformY, horizon, viewWidth)) {
-                        char c = (proj.type == ITEM_PEBBLE) ? 'o' : (proj.type == ITEM_BREAD ? 'B' : '+');
-                        uint32_t col = (proj.type == ITEM_PEBBLE) ? 0xFF94A3B8 : (proj.type == ITEM_BREAD ? 0xFFF59E0B : 0xFF06B6D4);
-                        drawGlyphFine(screenX, screenY, c, col);
-                    }
-                }
-            }
-        }
-    }
-
-    void renderStalkerSprite(const std::vector<float>& zBuffer, float maxVis) {
-        float spriteX = stalker.x - player.posX;
-        float spriteY = stalker.y - player.posY;
-
-        float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
-        float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
-        float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
-
-        if (transformY <= 0.2f || transformY > maxVis) return;
-
-        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
-        int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
-
-        int spriteHeight = std::abs(int(ROWS / transformY));
-        int drawStartY = -spriteHeight / 2 + ROWS / 2 + int(player.pitch);
-        int drawEndY = spriteHeight / 2 + ROWS / 2 + int(player.pitch);
-
-        int spriteWidth = std::abs(int(ROWS / transformY * 1.5f));
-        int drawStartX = -spriteWidth / 2 + screenX;
-        int drawEndX = spriteWidth / 2 + screenX;
-
-        const auto& currentSprite = (stalker.currentFrame == 0) ? stalker.frame0 : stalker.frame1;
-        int rowCount = currentSprite.size();
-        int colCount = currentSprite[0].size();
-
-        for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
-            if (stripe < 0 || stripe >= viewWidth || transformY > zBuffer[stripe]) continue;
-
-            int texX = int((stripe - drawStartX) * colCount / spriteWidth);
-            if (texX < 0 || texX >= colCount) continue;
-
-            for (int y = drawStartY; y < drawEndY; ++y) {
-                if (y < 0 || y >= ROWS) continue;
-                if (!isPixelVisible(stripe, y, transformY, drawStartY + spriteHeight / 2, viewWidth)) continue;
-
-                int texY = int((y - drawStartY) * rowCount / (drawEndY - drawStartY));
-                if (texY < 0 || texY >= rowCount) continue;
-
-                char glyph = currentSprite[texY][texX];
-                if (glyph != ' ' && glyph != '.') {
-                    uint32_t color = (transformY < 3.0f) ? CORRUPT_BRIGHT : TIER_HIGH_BRIGHT;
-                    drawGlyphFine(stripe, y, glyph, color);
-                }
-            }
-        }
-    }
-
-    void renderJumpscareScreen() {
-        const auto& currentSprite = stalker.frame0;
-        int rowCount = currentSprite.size();
-        int colCount = currentSprite[0].size();
-
-        int centerXOffset = (TOTAL_COLS - colCount) / 2;
-        int centerYOffset = (ROWS - rowCount) / 2;
-
-        for (int y = 0; y < rowCount; ++y) {
-            for (int x = 0; x < colCount; ++x) {
-                int screenX = centerXOffset + x;
-                int screenY = centerYOffset + y;
-
-                if ((rand() % 100) < 5) screenX += (rand() % 5) - 2;
-
-                if (screenX >= 0 && screenX < TOTAL_COLS && screenY >= 0 && screenY < ROWS) {
-                    char glyph = currentSprite[y][x];
-                    if (glyph != ' ' && glyph != '.') {
-                        uint32_t flashCol = ((rand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
-                        drawGlyphFine(screenX, screenY, glyph, flashCol);
-                    }
-                }
-            }
-        }
-
-        std::vector<std::string> creepyPhrases = {
-            "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
-        };
-        for (int i = 0; i < 5; ++i) {
-            int rx = rand() % (TOTAL_COLS - 15);
-            int ry = rand() % (ROWS - 2);
-            drawTextFine(rx, ry, creepyPhrases[rand() % creepyPhrases.size()], RED_GOAL_BRIGHT);
-        }
-    }
-
     void render3DView() {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         float totalPlayerZ = player.posZ + player.eyeHeight;
         int horizon = int(ROWS / 2 + player.pitch);
-        
-        float maxVis = (currentLevel >= 2) ? (player.lanternOn ? 14.0f : 0.8f) : 14.0f;
         
         std::vector<float> zBuffer(viewWidth, 1e30f);
 
@@ -1669,49 +1570,59 @@ public:
                 vOffset = (rand() % 5) - 2; 
             }
 
+            // 2-Pass Floor Projection to Fix "Walking on Air"
             for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
-                float straightDist = (ROWS * totalPlayerZ) / p;
-                if (straightDist > maxVis) continue; 
                 
-                if (!isPixelVisible(col, r, straightDist, horizon, viewWidth)) continue;
+                float zDiff = totalPlayerZ;
+                float straightDist = (ROWS * zDiff) / p;
                 
-                float weight = straightDist / perpWallDist;
-                float currentFloorX = weight * (player.posX + rayDirX * perpWallDist) + (1.0f - weight) * player.posX;
-                float currentFloorY = weight * (player.posY + rayDirY * perpWallDist) + (1.0f - weight) * player.posY;
+                float currentFloorX = player.posX + rayDirX * straightDist;
+                float currentFloorY = player.posY + rayDirY * straightDist;
 
-                int fTileX = int(currentFloorX);
-                int fTileY = int(currentFloorY);
+                int fTileX = std::clamp(int(currentFloorX), 0, MAP_W - 1);
+                int fTileY = std::clamp(int(currentFloorY), 0, MAP_H - 1);
 
-                if (fTileX >= 0 && fTileX < MAP_W && fTileY >= 0 && fTileY < MAP_H) {
-                    float sampledFloorH = worldMap[fTileY][fTileX].floorH;
-                    uint32_t floorColor = getElevationColor(sampledFloorH, straightDist, 0);
+                float sampledFloorH = worldMap[fTileY][fTileX].floorH;
+                if (sampledFloorH > 0.01f) {
+                    zDiff = std::max(0.1f, totalPlayerZ - sampledFloorH);
+                    straightDist = (ROWS * zDiff) / p;
+                    currentFloorX = player.posX + rayDirX * straightDist;
+                    currentFloorY = player.posY + rayDirY * straightDist;
+                    fTileX = std::clamp(int(currentFloorX), 0, MAP_W - 1);
+                    fTileY = std::clamp(int(currentFloorY), 0, MAP_H - 1);
+                    sampledFloorH = worldMap[fTileY][fTileX].floorH;
+                }
 
-                    char floorGlyph = ' ';
-                    
-                    if (worldMap[fTileY][fTileX].isStairs) {
-                        floorGlyph = (int(straightDist * 3.0f) % 2 == 0) ? '=' : '_';
-                    } 
-                    else if (sampledFloorH > 0.8f) {
-                        bool isCheck = ((fTileX + fTileY) % 2 == 0);
-                        floorGlyph = isCheck ? '#' : '-';
-                        floorColor = isCheck ? TIER_HIGH_BRIGHT : TIER_HIGH_DARK;
-                        if (activeCorr >= 0.85f) floorColor = isCheck ? CORRUPT_BRIGHT : CORRUPT_DARK;
-                        if (straightDist > 6.0f && (col % 2 != 0)) floorGlyph = ' ';
-                    } 
-                    else {
-                        if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
-                            floorGlyph = '.';
-                        }
+                float vis = calculateVisibility(col, r, straightDist, viewWidth, player.pitch);
+                if (vis <= 0.02f) continue;
+                
+                uint32_t floorColor = getElevationColor(sampledFloorH, straightDist, 0);
+                char floorGlyph = ' ';
+                
+                if (worldMap[fTileY][fTileX].isStairs) {
+                    floorGlyph = (int(straightDist * 3.0f) % 2 == 0) ? '=' : '_';
+                } 
+                else if (sampledFloorH > 0.8f) {
+                    bool isCheck = ((fTileX + fTileY) % 2 == 0);
+                    floorGlyph = isCheck ? '#' : '-';
+                    floorColor = isCheck ? TIER_HIGH_BRIGHT : TIER_HIGH_DARK;
+                    if (activeCorr >= 0.85f) floorColor = isCheck ? CORRUPT_BRIGHT : CORRUPT_DARK;
+                    if (straightDist > 6.0f && (col % 2 != 0)) floorGlyph = ' ';
+                } 
+                else {
+                    if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
+                        floorGlyph = '.';
                     }
+                }
 
-                    if (activeCorr > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(activeCorr * 10)) {
-                        floorGlyph = "?!@#$%^&*"[rand() % 9];
-                    }
+                if (activeCorr > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(activeCorr * 10)) {
+                    floorGlyph = "?!@#$%^&*"[rand() % 9];
+                }
 
-                    if (floorGlyph != ' ') {
-                        drawGlyphFine(col, r + vOffset, floorGlyph, floorColor);
-                    }
+                if (floorGlyph != ' ') {
+                    uint32_t finalFloorColor = applyShadow(floorColor, vis);
+                    drawGlyphFine(col, r + vOffset, floorGlyph, finalFloorColor);
                 }
             }
 
@@ -1721,10 +1632,7 @@ public:
             char wallGlyph = ' ';
             uint32_t wallColor;
 
-            if (perpWallDist > maxVis) {
-                wallGlyph = ' '; 
-            }
-            else if (hit == 2) {
+            if (hit == 2) {
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
                 wallGlyph = (perpWallDist <= 2.50f) ? '#' : '%';
             } 
@@ -1748,21 +1656,39 @@ public:
                 wallGlyph = "?!@#$%^&*"[rand() % 9];
             }
 
+            // EDGE DETECTION
+            float wallX;
+            if (side == 0) wallX = player.posY + perpWallDist * rayDirY;
+            else           wallX = player.posX + perpWallDist * rayDirX;
+            wallX -= std::floor(wallX);
+            
+            float cornerShade = std::clamp(std::min(wallX, 1.0f - wallX) * 10.0f, 0.05f, 1.0f);
+            bool isCorner = (wallX <= 0.035f || wallX >= 0.965f);
+
             int drawStart = horizon - int(((baseCeil - totalPlayerZ) * ROWS) / perpWallDist);
             int drawEnd   = horizon - int(((baseFloor - totalPlayerZ) * ROWS) / perpWallDist);
 
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
-                    if (!isPixelVisible(col, r, perpWallDist, horizon, viewWidth)) continue;
+                    float vis = calculateVisibility(col, r, perpWallDist, viewWidth, player.pitch);
+                    if (vis <= 0.02f) continue;
+                    
                     char finalGlyph = wallGlyph;
                     if (hit == 3) {
                         finalGlyph = ((r + col) % 2 == 0) ? '\\' : '/';
                     }
-                    drawGlyphFine(col, r + vOffset, finalGlyph, wallColor);
+                    
+                    if (isCorner && hit != 3 && hit != 2) {
+                        drawRectFilled(col, r + vOffset, 1, 1, 0xFF050505); 
+                        drawGlyphFine(col, r + vOffset, '|', 0xFF1E293B); 
+                    } else {
+                        uint32_t finalColor = applyShadow(wallColor, vis * cornerShade);
+                        drawGlyphFine(col, r + vOffset, finalGlyph, finalColor);
+                    }
                 }
             }
 
-            if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist && stepRiserDist <= maxVis) {
+            if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist) {
                 float lowH = std::min(prevFloorH, prevFloorH + stepFloorDiff);
                 float highH = std::max(prevFloorH, prevFloorH + stepFloorDiff);
 
@@ -1774,17 +1700,44 @@ public:
 
                 for (int r = stepTop; r <= stepBottom; ++r) {
                     if (r >= 0 && r < ROWS) {
-                        if (!isPixelVisible(col, r, stepRiserDist, horizon, viewWidth)) continue;
-                        drawGlyphFine(col, r + vOffset, stepGlyph, stepColor);
+                        float vis = calculateVisibility(col, r, stepRiserDist, viewWidth, player.pitch);
+                        if (vis <= 0.02f) continue;
+                        
+                        uint32_t finalColor = applyShadow(stepColor, vis);
+                        drawGlyphFine(col, r + vOffset, stepGlyph, finalColor);
                     }
                 }
             }
         }
 
-        renderItems(zBuffer, maxVis);
+        renderItems(zBuffer);
 
-        if (stalker.mode > 0) {
-            renderStalkerSprite(zBuffer, maxVis);
+        if (stalker.active) renderEnemySprite(zBuffer, stalker, spriteStalker0, spriteStalker1);
+        if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist1);
+
+        // ==========================================
+        // OVERLAY RENDER: RIPPLING FOG (LEVELS 12-15)
+        // ==========================================
+        if (mistEnemy.active) {
+            float distToMonster = std::hypot(player.posX - mistEnemy.x, player.posY - mistEnemy.y);
+            float mistIntensity = std::clamp(1.0f - (distToMonster / 10.0f), 0.0f, 1.0f);
+            
+            if (mistIntensity > 0.0f) {
+                int numParticles = int(mistIntensity * viewWidth * ROWS * 0.15f);
+                for (int i = 0; i < numParticles; ++i) {
+                    int rx = rand() % viewWidth;
+                    int ry = rand() % ROWS;
+                    
+                    float wave = std::sin(levelTime * 2.0f + rx * 0.1f + ry * 0.05f);
+                    int waveY = ry + int(wave * 2.0f);
+                    
+                    if (waveY >= 0 && waveY < ROWS) {
+                        char mChar = (rand() % 2 == 0) ? '~' : '-';
+                        uint32_t mColor = (rand() % 2 == 0) ? 0xFF10B981 : 0xFF8B5CF6; 
+                        drawGlyphFine(rx, waveY, mChar, applyShadow(mColor, mistIntensity * 0.8f));
+                    }
+                }
+            }
         }
 
         int cx = viewWidth / 2;
@@ -1845,6 +1798,204 @@ public:
         }
     }
 
+    void renderItems(const std::vector<float>& zBuffer) {
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+        
+        std::vector<std::pair<float, ItemEntity>> sortedItems;
+        for(const auto& it : itemsInWorld) {
+            float dist = std::pow(player.posX - it.x, 2) + std::pow(player.posY - it.y, 2);
+            sortedItems.push_back({dist, it});
+        }
+        std::sort(sortedItems.begin(), sortedItems.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+
+        for(const auto& pair : sortedItems) {
+            const ItemEntity& item = pair.second;
+            float spriteX = item.x - player.posX;
+            float spriteY = item.y - player.posY;
+
+            float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+            float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+            float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+            if (transformY <= 0.2f) continue;
+
+            int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
+            float floorH = worldMap[int(item.y)][int(item.x)].floorH;
+            float totalPlayerZ = player.posZ + player.eyeHeight;
+            int horizon = int(ROWS / 2 + player.pitch);
+            
+            int screenY = horizon - int(((floorH - totalPlayerZ) * ROWS) / transformY);
+            
+            const std::vector<std::string>* activeSpritePtr = &spriteBread;
+            if (item.type == ITEM_MEDS) activeSpritePtr = &spriteMeds;
+            else if (item.type == ITEM_PEBBLE) activeSpritePtr = &spritePebble;
+
+            const auto& activeSprite = *activeSpritePtr;
+            int rowCount = activeSprite.size();
+            int colCount = activeSprite[0].size();
+            
+            float heightDivisor = (item.type == ITEM_PEBBLE) ? 4.0f : 1.5f; 
+            int spriteHeight = std::abs(int(ROWS / transformY / heightDivisor)); 
+            if (spriteHeight == 0) continue;
+            
+            float aspectMultiplier = 0.50f; 
+            float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
+            int spriteWidth = int(spriteHeight * aspect);
+
+            int drawStartY = screenY - spriteHeight;
+            int drawEndY = screenY;
+            int drawStartX = screenX - spriteWidth / 2;
+            int drawEndX = screenX + spriteWidth / 2;
+
+            uint32_t color = (item.type == ITEM_BREAD) ? 0xFFF59E0B : ((item.type == ITEM_MEDS) ? 0xFF06B6D4 : 0xFF94A3B8);
+            int vOffset = (player.toxicTimer > 0.0f) ? (rand() % 5) - 2 : 0;
+
+            for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
+                if (stripe < 0 || stripe >= viewWidth || transformY > zBuffer[stripe]) continue;
+                int texX = int((stripe - drawStartX) * colCount / spriteWidth);
+                if (texX < 0 || texX >= colCount) continue;
+
+                for (int y = drawStartY; y < drawEndY; ++y) {
+                    if (y < 0 || y >= ROWS) continue;
+                    
+                    float vis = calculateVisibility(stripe, y, transformY, viewWidth, player.pitch);
+                    if (vis <= 0.02f) continue;
+                    
+                    int texY = int((y - drawStartY) * rowCount / spriteHeight);
+                    if (texY < 0 || texY >= rowCount) continue;
+
+                    char glyph = activeSprite[texY][texX];
+                    
+                    if (glyph != ' ') {
+                        drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
+                        drawGlyphFine(stripe, y + vOffset, glyph, applyShadow(color, vis));
+                    } else {
+                        bool nearGlyph = false;
+                        for (int dy = -1; dy <= 1; ++dy) {
+                            for (int dx = -1; dx <= 1; ++dx) {
+                                if (dx == 0 && dy == 0) continue;
+                                int ny = texY + dy; int nx = texX + dx;
+                                if (ny >= 0 && ny < rowCount && nx >= 0 && nx < colCount) {
+                                    char n = activeSprite[ny][nx];
+                                    if (n != ' ') { nearGlyph = true; break; }
+                                }
+                            }
+                            if (nearGlyph) break;
+                        }
+                        if (nearGlyph) drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
+                    }
+                }
+            }
+        }
+        
+        for (const auto& proj : activeProjectiles) {
+            float spriteX = proj.x - player.posX;
+            float spriteY = proj.y - player.posY;
+            float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+            float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+            float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+            if (transformY > 0.2f) {
+                int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
+                float totalPlayerZ = player.posZ + player.eyeHeight;
+                int horizon = int(ROWS / 2 + player.pitch);
+                int screenY = horizon - int(((proj.z - totalPlayerZ) * ROWS) / transformY);
+                if (screenX >= 0 && screenX < viewWidth && transformY <= zBuffer[screenX] && screenY >= 0 && screenY < ROWS) {
+                    float vis = calculateVisibility(screenX, screenY, transformY, viewWidth, player.pitch);
+                    if (vis > 0.02f) {
+                        char c = (proj.type == ITEM_PEBBLE) ? 'o' : (proj.type == ITEM_BREAD ? 'B' : '+');
+                        uint32_t col = (proj.type == ITEM_PEBBLE) ? 0xFF94A3B8 : (proj.type == ITEM_BREAD ? 0xFFF59E0B : 0xFF06B6D4);
+                        drawGlyphFine(screenX, screenY, c, applyShadow(col, vis));
+                    }
+                }
+            }
+        }
+    }
+
+    void renderEnemySprite(const std::vector<float>& zBuffer, const Enemy& e, const std::vector<std::string>& f0, const std::vector<std::string>& f1) {
+        float spriteX = e.x - player.posX;
+        float spriteY = e.y - player.posY;
+
+        float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+        float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+        float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+        if (transformY <= 0.2f) return;
+
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+        int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
+
+        int spriteHeight = std::abs(int(ROWS / transformY));
+        int drawStartY = -spriteHeight / 2 + ROWS / 2 + int(player.pitch);
+        int drawEndY = spriteHeight / 2 + ROWS / 2 + int(player.pitch);
+
+        int spriteWidth = std::abs(int(ROWS / transformY * 1.5f));
+        int drawStartX = -spriteWidth / 2 + screenX;
+        int drawEndX = spriteWidth / 2 + screenX;
+
+        const auto& currentSprite = (e.currentFrame == 0) ? f0 : f1;
+        int rowCount = currentSprite.size();
+        int colCount = currentSprite[0].size();
+
+        for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
+            if (stripe < 0 || stripe >= viewWidth || transformY > zBuffer[stripe]) continue;
+
+            int texX = int((stripe - drawStartX) * colCount / spriteWidth);
+            if (texX < 0 || texX >= colCount) continue;
+
+            for (int y = drawStartY; y < drawEndY; ++y) {
+                if (y < 0 || y >= ROWS) continue;
+                
+                float vis = calculateVisibility(stripe, y, transformY, viewWidth, player.pitch);
+                if (vis <= 0.02f) continue;
+
+                int texY = int((y - drawStartY) * rowCount / (drawEndY - drawStartY));
+                if (texY < 0 || texY >= rowCount) continue;
+
+                char glyph = currentSprite[texY][texX];
+                if (glyph != ' ' && glyph != '.') {
+                    uint32_t color = (transformY < 3.0f) ? CORRUPT_BRIGHT : TIER_HIGH_BRIGHT;
+                    drawGlyphFine(stripe, y, glyph, applyShadow(color, vis));
+                }
+            }
+        }
+    }
+
+   void renderJumpscareScreen() {
+        const auto& currentSprite = spriteStalker0; // <--- FIXED: Now points to the correct Stalker sprite array
+        int rowCount = currentSprite.size();
+        int colCount = currentSprite[0].size();
+
+        int centerXOffset = (TOTAL_COLS - colCount) / 2;
+        int centerYOffset = (ROWS - rowCount) / 2;
+
+        for (int y = 0; y < rowCount; ++y) {
+            for (int x = 0; x < colCount; ++x) {
+                int screenX = centerXOffset + x;
+                int screenY = centerYOffset + y;
+
+                if ((rand() % 100) < 5) screenX += (rand() % 5) - 2;
+
+                if (screenX >= 0 && screenX < TOTAL_COLS && screenY >= 0 && screenY < ROWS) {
+                    char glyph = currentSprite[y][x];
+                    if (glyph != ' ' && glyph != '.') {
+                        uint32_t flashCol = ((rand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
+                        drawGlyphFine(screenX, screenY, glyph, flashCol);
+                    }
+                }
+            }
+        }
+
+        std::vector<std::string> creepyPhrases = {
+            "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
+        };
+        for (int i = 0; i < 5; ++i) {
+            int rx = rand() % (TOTAL_COLS - 15);
+            int ry = rand() % (ROWS - 2);
+            drawTextFine(rx, ry, creepyPhrases[rand() % creepyPhrases.size()], RED_GOAL_BRIGHT);
+        }
+    }
+    
     void renderSidebarMinimap() {
         for (int r = 0; r < ROWS; ++r) drawGlyphFine(68, r, '|', 0xFF334155);
 
@@ -1886,14 +2037,16 @@ public:
         }
         drawGlyphFine(miniStartX + pMapX, miniStartY + pMapY, 'O', 0xFF38BDF8);
 
-        if (stalker.mode > 0 && (stalker.isChasing || stalker.investigateTimer > 0.0f || stalker.mode == 1)) {
-            int mX = int(stalker.x);
-            int mY = int(stalker.y);
-            if (mX >= 0 && mX < MAP_W && mY >= 0 && mY < MAP_H && isMapVisible(stalker.x, stalker.y)) {
-                char gChar = "!@#$%&*X?"[rand() % 9];
-                uint32_t mCol = stalker.enragedTimer > 0.0f ? RED_GOAL_BRIGHT : (stalker.isChasing ? 0xFFBE123C : 0xFFF59E0B);
-                drawGlyphFine(miniStartX + mX, miniStartY + mY, gChar, mCol);
-            }
+        if (stalker.active && stalker.mode > 0 && isMapVisible(stalker.x, stalker.y)) {
+            char gChar = "!@#$%&*X?"[rand() % 9];
+            uint32_t mCol = stalker.enragedTimer > 0.0f ? RED_GOAL_BRIGHT : (stalker.isChasing ? 0xFFBE123C : 0xFFF59E0B);
+            drawGlyphFine(miniStartX + int(stalker.x), miniStartY + int(stalker.y), gChar, mCol);
+        }
+        
+        if (mistEnemy.active && isMapVisible(mistEnemy.x, mistEnemy.y)) {
+            char gChar = '~';
+            uint32_t mCol = 0xFF8B5CF6;
+            drawGlyphFine(miniStartX + int(mistEnemy.x), miniStartY + int(mistEnemy.y), gChar, mCol);
         }
 
         drawTextFine(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
@@ -1929,7 +2082,7 @@ public:
 
         drawTextFine(35, 32, "[R / ESC] RESUME GAME", TIER_HIGH_BRIGHT);
         drawTextFine(35, 36, "[Q] QUIT TO TITLE", RED_GOAL_BRIGHT);
-        drawTextFine(34, 40, "DEV: [F2-F10] SET LEVEL", 0xFF64748B);
+        drawTextFine(34, 40, "DEV: [PgUp/PgDn] SET LEVEL", 0xFF64748B);
     }
 
     void renderSuccessScreen() {
