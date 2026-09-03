@@ -160,7 +160,7 @@ struct AudioState {
     float screamPhase = 0.0f;
     float footstepPhase = 0.0f;
     
-    int itemSoundType = 0; // 0=None, 1=Pebble, 2=Meds, 3=Bread
+    int itemSoundType = 0; 
     float itemSoundTimer = 0.0f;
     float itemSoundPhase = 0.0f;
     
@@ -272,6 +272,11 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
                 float wave = std::sin(t * 2.0f * 3.14159f * 100.0f);
                 itemSound = (noise * 0.4f + wave * 0.6f) * env * 0.4f;
             }
+            else if (audio->itemSoundType == 4) { // Lantern Click
+                float env = std::exp(-t * 30.0f);
+                float noise = getAudioNoise(audio->rngSeed);
+                itemSound = noise * env * 0.6f;
+            }
         }
 
         buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio + itemSound, -1.0f, 1.0f) * 32767.0f);
@@ -339,6 +344,10 @@ private:
 
         ItemType inventory[3] = {ITEM_NONE, ITEM_NONE, ITEM_NONE};
         float toxicTimer = 0.0f;
+        
+        bool lanternOn = false;
+        bool lanternBroken = false;
+        int reigniteClicks = 0;
     } player;
 
     const std::vector<std::string> spriteBread = {
@@ -415,7 +424,7 @@ private:
         float y = 12.5f;
         float speed = 1.8f;
         
-        int mode = 0; // 0=None, 1=Watcher, 2=Hunter
+        int mode = 0; 
         bool isChasing = false;
         
         float animTimer = 0.0f;
@@ -557,6 +566,51 @@ private:
         else                   return cDark;
     }
 
+    // ==========================================
+    // VISIBILITY MATH (THE SPOTLIGHT FOG)
+    // ==========================================
+    bool isPixelVisible(int col, int row, float dist, int horizon, int viewWidth) {
+        if (currentLevel < 2) return true; 
+        
+        float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
+        float cameraY = 2.0f * (row - horizon) / float(ROWS);
+        float aspect = (float)viewWidth / (float)ROWS;
+        float spotRadius = std::hypot(cameraX * aspect, cameraY);
+        
+        if (player.lanternOn) {
+            if (spotRadius > 0.85f || dist > 14.0f) return false;
+            if (spotRadius > 0.70f && (rand() % 100) < ((spotRadius - 0.70f) * 600.0f)) return false;
+            return true;
+        } else {
+            // Pitch black, only see absolute immediate proximity (practically touching)
+            if (dist > 0.8f) return false; 
+            if (dist > 0.3f && (rand() % 100) < ((dist - 0.3f) * 200.0f)) return false; 
+            return true;
+        }
+    }
+
+    bool isMapVisible(float mapX, float mapY) {
+        if (currentLevel < 2) return true; 
+        
+        float dx = mapX - player.posX;
+        float dy = mapY - player.posY;
+        float dist = std::hypot(dx, dy);
+        
+        // Base vision without lantern
+        if (dist <= 0.8f) return true; 
+        
+        // Spotlight cone logic
+        if (player.lanternOn && dist <= 14.0f) {
+            float angle = std::atan2(dy, dx);
+            float pAngle = std::atan2(player.dirY, player.dirX);
+            float diff = std::abs(std::atan2(std::sin(angle - pAngle), std::cos(angle - pAngle)));
+            if (diff > 3.14159f) diff = 2.0f * 3.14159f - diff; 
+            
+            if (diff <= 0.5f) return true; 
+        }
+        return false;
+    }
+
     void generateProceduralMultiLevelMaze() {
         srand(static_cast<unsigned int>(time(nullptr)) + currentLevel * 1337);
         itemsInWorld.clear();
@@ -695,6 +749,10 @@ private:
         player.planeY = 0.66f;
         player.stepAccumulator = 0.0f;
         player.toxicTimer = 0.0f;
+        
+        player.lanternOn = false;
+        player.lanternBroken = false;
+        player.reigniteClicks = 0;
 
         stalker.x = MAP_W / 2 + 0.5f;
         stalker.y = MAP_H / 2 + 0.5f;
@@ -702,16 +760,15 @@ private:
         stalker.enragedTimer = 0.0f;
         stalker.investigateTimer = 0.0f;
         
-        // Setup Escalation Engine based on Current Level
         if (currentLevel <= 5) {
             corruptionLevel = 0.0f;
-            stalker.mode = 0; // Disabled
+            stalker.mode = 0; 
         } else if (currentLevel <= 15) {
             corruptionLevel = std::min(1.0f, (currentLevel - 5) * 0.1f);
-            stalker.mode = (rand() % 100 < 30) ? 1 : 0; // 30% chance Watcher
+            stalker.mode = (rand() % 100 < 30) ? 1 : 0; 
         } else {
             corruptionLevel = 1.0f;
-            stalker.mode = 2; // Always Hunter
+            stalker.mode = 2; 
         }
     }
 
@@ -719,6 +776,7 @@ private:
         currentLevel = 1;
         totalSteps = 0;
         levelTime = 0.0f;
+        corruptionLevel = 0.0f; 
         player.sanity = 100.0f;
         player.health = 100.0f;
         
@@ -924,6 +982,24 @@ public:
                         audioState.inGame = false;
                         SDL_UnlockAudioDevice(audioDevice);
                     }
+                    else if (event.key.keysym.sym == SDLK_f) {
+                        SDL_LockAudioDevice(audioDevice);
+                        audioState.itemSoundType = 4;
+                        audioState.itemSoundPhase = 0.0f;
+                        audioState.itemSoundTimer = 0.2f;
+                        SDL_UnlockAudioDevice(audioDevice);
+
+                        if (player.lanternBroken) {
+                            player.reigniteClicks++;
+                            if (player.reigniteClicks >= 3) {
+                                player.lanternBroken = false;
+                                player.lanternOn = true;
+                                player.reigniteClicks = 0;
+                            }
+                        } else {
+                            player.lanternOn = !player.lanternOn;
+                        }
+                    }
                     else if (event.key.keysym.sym == SDLK_e) {
                         for (auto it = itemsInWorld.begin(); it != itemsInWorld.end(); ++it) {
                             if (std::hypot(player.posX - it->x, player.posY - it->y) < 1.5f) {
@@ -1113,6 +1189,17 @@ public:
                 player.stepAccumulator = 0.0f;
             }
         }
+        
+        if (player.isSprinting && player.lanternOn) {
+            player.lanternOn = false;
+            player.lanternBroken = true;
+            player.reigniteClicks = 0;
+            SDL_LockAudioDevice(audioDevice);
+            audioState.itemSoundType = 4;
+            audioState.itemSoundPhase = 0.0f;
+            audioState.itemSoundTimer = 0.2f;
+            SDL_UnlockAudioDevice(audioDevice);
+        }
 
         if (worldMap[int(player.posY)][int(player.posX)].wallType == 3) {
             player.isCrouching = true;
@@ -1144,7 +1231,7 @@ public:
             if (stalker.mode > 0) {
                 float distToProj = std::hypot(proj.x - stalker.x, proj.y - stalker.y);
                 if (distToProj < 0.8f && proj.z < 2.0f) {
-                    if (stalker.mode == 1) stalker.mode = 2; // Enrage Watcher to Hunter
+                    if (stalker.mode == 1) stalker.mode = 2; 
                     stalker.enragedTimer = 5.0f; 
                     proj.active = false;
                 }
@@ -1178,27 +1265,40 @@ public:
         
         activeProjectiles.erase(std::remove_if(activeProjectiles.begin(), activeProjectiles.end(), [](const Projectile& p){ return !p.active; }), activeProjectiles.end());
 
-        // ==========================================
-        // DYNAMIC ESCALATION AI LOGIC
-        // ==========================================
         if (stalker.mode > 0) {
             float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
 
             bool playerMakingNoise = (player.forward != 0 || player.strafe != 0) && !player.isCrouching;
             float noiseRadius = player.isSprinting ? 14.0f : (playerMakingNoise ? 6.0f : 1.5f);
-            bool noticedPlayer = (distToMonster < noiseRadius);
+            
+            bool hasLOS = false;
+            if (player.lanternOn && distToMonster < 14.0f) {
+                float rayX = stalker.x;
+                float rayY = stalker.y;
+                float dirX = (player.posX - stalker.x) / distToMonster;
+                float dirY = (player.posY - stalker.y) / distToMonster;
+                hasLOS = true;
+                for (float step = 0; step < distToMonster; step += 0.5f) {
+                    if (worldMap[std::clamp(int(rayY), 0, MAP_H - 1)][std::clamp(int(rayX), 0, MAP_W - 1)].wallType == 1) {
+                        hasLOS = false; break;
+                    }
+                    rayX += dirX * 0.5f;
+                    rayY += dirY * 0.5f;
+                }
+            }
+
+            bool noticedPlayer = (distToMonster < noiseRadius) || hasLOS;
 
             if (stalker.enragedTimer > 0.0f) {
                 stalker.enragedTimer -= dtSec;
                 stalker.speed = 3.5f; 
                 stalker.investigateTimer = 0.0f; 
-                stalker.mode = 2; // Force hunt if angry
+                stalker.mode = 2; 
             } else {
                 stalker.speed = (stalker.mode == 1) ? 1.4f : 1.8f; 
             }
 
             if (stalker.mode == 2) {
-                // HUNTER MODE
                 if (noticedPlayer || stalker.enragedTimer > 0.0f || distToMonster < 8.5f) {
                     stalker.isChasing = true;
                     stalker.investigateTimer = 0.0f;
@@ -1241,7 +1341,6 @@ public:
                 }
             } 
             else if (stalker.mode == 1) {
-                // WATCHER MODE
                 stalker.isChasing = false; 
                 float targetDist = 14.0f;
 
@@ -1257,7 +1356,6 @@ public:
                     }
                 } 
                 else if (distToMonster < targetDist - 2.0f) {
-                    // Backs away into shadows
                     float dx = (stalker.x - player.posX) / distToMonster;
                     float dy = (stalker.y - player.posY) / distToMonster;
                     moveStalkerToward(dx, dy, dtSec);
@@ -1265,7 +1363,6 @@ public:
                     if (stalker.animTimer > 0.35f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
                 } 
                 else if (distToMonster > targetDist + 2.0f && noticedPlayer) {
-                    // Creeps closer
                     float dx = (player.posX - stalker.x) / distToMonster;
                     float dy = (player.posY - stalker.y) / distToMonster;
                     moveStalkerToward(dx, dy, dtSec);
@@ -1274,7 +1371,7 @@ public:
                 }
 
                 if (distToMonster < 1.0f) {
-                    stalker.mode = 0; // Vanishes if touched
+                    stalker.mode = 0; 
                 }
             }
         }
@@ -1314,7 +1411,7 @@ public:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    void renderItems(const std::vector<float>& zBuffer) {
+    void renderItems(const std::vector<float>& zBuffer, float maxVis) {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         
         std::vector<std::pair<float, ItemEntity>> sortedItems;
@@ -1333,7 +1430,7 @@ public:
             float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
             float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
 
-            if (transformY <= 0.2f) continue;
+            if (transformY <= 0.2f || transformY > maxVis) continue;
 
             int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
             float floorH = worldMap[int(item.y)][int(item.x)].floorH;
@@ -1373,6 +1470,8 @@ public:
 
                 for (int y = drawStartY; y < drawEndY; ++y) {
                     if (y < 0 || y >= ROWS) continue;
+                    if (!isPixelVisible(stripe, y, transformY, horizon, viewWidth)) continue;
+
                     int texY = int((y - drawStartY) * rowCount / spriteHeight);
                     if (texY < 0 || texY >= rowCount) continue;
 
@@ -1407,21 +1506,23 @@ public:
             float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
             float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
 
-            if (transformY > 0.2f) {
+            if (transformY > 0.2f && transformY <= maxVis) {
                 int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
                 float totalPlayerZ = player.posZ + player.eyeHeight;
                 int horizon = int(ROWS / 2 + player.pitch);
                 int screenY = horizon - int(((proj.z - totalPlayerZ) * ROWS) / transformY);
                 if (screenX >= 0 && screenX < viewWidth && transformY <= zBuffer[screenX] && screenY >= 0 && screenY < ROWS) {
-                    char c = (proj.type == ITEM_PEBBLE) ? 'o' : (proj.type == ITEM_BREAD ? 'B' : '+');
-                    uint32_t col = (proj.type == ITEM_PEBBLE) ? 0xFF94A3B8 : (proj.type == ITEM_BREAD ? 0xFFF59E0B : 0xFF06B6D4);
-                    drawGlyphFine(screenX, screenY, c, col);
+                    if (isPixelVisible(screenX, screenY, transformY, horizon, viewWidth)) {
+                        char c = (proj.type == ITEM_PEBBLE) ? 'o' : (proj.type == ITEM_BREAD ? 'B' : '+');
+                        uint32_t col = (proj.type == ITEM_PEBBLE) ? 0xFF94A3B8 : (proj.type == ITEM_BREAD ? 0xFFF59E0B : 0xFF06B6D4);
+                        drawGlyphFine(screenX, screenY, c, col);
+                    }
                 }
             }
         }
     }
 
-    void renderStalkerSprite(const std::vector<float>& zBuffer) {
+    void renderStalkerSprite(const std::vector<float>& zBuffer, float maxVis) {
         float spriteX = stalker.x - player.posX;
         float spriteY = stalker.y - player.posY;
 
@@ -1429,7 +1530,7 @@ public:
         float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
         float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
 
-        if (transformY <= 0.2f) return;
+        if (transformY <= 0.2f || transformY > maxVis) return;
 
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
@@ -1454,6 +1555,7 @@ public:
 
             for (int y = drawStartY; y < drawEndY; ++y) {
                 if (y < 0 || y >= ROWS) continue;
+                if (!isPixelVisible(stripe, y, transformY, drawStartY + spriteHeight / 2, viewWidth)) continue;
 
                 int texY = int((y - drawStartY) * rowCount / (drawEndY - drawStartY));
                 if (texY < 0 || texY >= rowCount) continue;
@@ -1506,6 +1608,8 @@ public:
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         float totalPlayerZ = player.posZ + player.eyeHeight;
         int horizon = int(ROWS / 2 + player.pitch);
+        
+        float maxVis = (currentLevel >= 2) ? (player.lanternOn ? 14.0f : 0.8f) : 14.0f;
         
         std::vector<float> zBuffer(viewWidth, 1e30f);
 
@@ -1568,8 +1672,11 @@ public:
             for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
                 float straightDist = (ROWS * totalPlayerZ) / p;
+                if (straightDist > maxVis) continue; 
+                
+                if (!isPixelVisible(col, r, straightDist, horizon, viewWidth)) continue;
+                
                 float weight = straightDist / perpWallDist;
-
                 float currentFloorX = weight * (player.posX + rayDirX * perpWallDist) + (1.0f - weight) * player.posX;
                 float currentFloorY = weight * (player.posY + rayDirY * perpWallDist) + (1.0f - weight) * player.posY;
 
@@ -1614,7 +1721,10 @@ public:
             char wallGlyph = ' ';
             uint32_t wallColor;
 
-            if (hit == 2) {
+            if (perpWallDist > maxVis) {
+                wallGlyph = ' '; 
+            }
+            else if (hit == 2) {
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
                 wallGlyph = (perpWallDist <= 2.50f) ? '#' : '%';
             } 
@@ -1643,6 +1753,7 @@ public:
 
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
+                    if (!isPixelVisible(col, r, perpWallDist, horizon, viewWidth)) continue;
                     char finalGlyph = wallGlyph;
                     if (hit == 3) {
                         finalGlyph = ((r + col) % 2 == 0) ? '\\' : '/';
@@ -1651,7 +1762,7 @@ public:
                 }
             }
 
-            if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist) {
+            if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist && stepRiserDist <= maxVis) {
                 float lowH = std::min(prevFloorH, prevFloorH + stepFloorDiff);
                 float highH = std::max(prevFloorH, prevFloorH + stepFloorDiff);
 
@@ -1663,16 +1774,17 @@ public:
 
                 for (int r = stepTop; r <= stepBottom; ++r) {
                     if (r >= 0 && r < ROWS) {
+                        if (!isPixelVisible(col, r, stepRiserDist, horizon, viewWidth)) continue;
                         drawGlyphFine(col, r + vOffset, stepGlyph, stepColor);
                     }
                 }
             }
         }
 
-        renderItems(zBuffer);
+        renderItems(zBuffer, maxVis);
 
         if (stalker.mode > 0) {
-            renderStalkerSprite(zBuffer);
+            renderStalkerSprite(zBuffer, maxVis);
         }
 
         int cx = viewWidth / 2;
@@ -1684,7 +1796,7 @@ public:
             drawTextFine(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
-        drawRectFilled(1, 1, 52, 13, 0xFF050505); 
+        drawRectFilled(1, 1, 52, 15, 0xFF050505); 
 
         std::string elevStr;
         uint32_t elevColor;
@@ -1724,6 +1836,9 @@ public:
         
         drawTextFine(2, 10, "INV: [1] " + getItemName(player.inventory[0]) + " [2] " + getItemName(player.inventory[1]) + " [3] " + getItemName(player.inventory[2]), 0xFF94A3B8);
         drawTextFine(2, 12, "[E] Pick Up | [1-3] Use/Throw | [SHIFT+1-3] Drop", TIER_MID_BRIGHT);
+        
+        std::string lanStr = player.lanternBroken ? ("BROKEN (" + std::to_string(player.reigniteClicks) + "/3)") : (player.lanternOn ? "ON" : "OFF");
+        drawTextFine(2, 14, "[F] Lantern: " + lanStr, (player.lanternBroken ? RED_GOAL_BRIGHT : (player.lanternOn ? TIER_HIGH_BRIGHT : 0xFF94A3B8)));
 
         if (currentDifficulty == DIFF_EASY) {
             renderSidebarMinimap();
@@ -1738,6 +1853,8 @@ public:
 
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
+                if (!isMapVisible(c + 0.5f, r + 0.5f)) continue;
+
                 char mapCh = ' ';
                 uint32_t mapCol = 0xFF1E293B;
 
@@ -1753,7 +1870,7 @@ public:
         }
 
         for (const auto& it : itemsInWorld) {
-            if (it.x >= 0 && it.x < MAP_W && it.y >= 0 && it.y < MAP_H) {
+            if (it.x >= 0 && it.x < MAP_W && it.y >= 0 && it.y < MAP_H && isMapVisible(it.x, it.y)) {
                 char ch = (it.type == ITEM_BREAD) ? 'B' : ((it.type == ITEM_MEDS) ? '+' : 'o');
                 uint32_t color = (it.type == ITEM_BREAD) ? 0xFFF59E0B : ((it.type == ITEM_MEDS) ? 0xFF06B6D4 : 0xFF94A3B8);
                 drawGlyphFine(miniStartX + int(it.x), miniStartY + int(it.y), ch, color);
@@ -1772,7 +1889,7 @@ public:
         if (stalker.mode > 0 && (stalker.isChasing || stalker.investigateTimer > 0.0f || stalker.mode == 1)) {
             int mX = int(stalker.x);
             int mY = int(stalker.y);
-            if (mX >= 0 && mX < MAP_W && mY >= 0 && mY < MAP_H) {
+            if (mX >= 0 && mX < MAP_W && mY >= 0 && mY < MAP_H && isMapVisible(stalker.x, stalker.y)) {
                 char gChar = "!@#$%&*X?"[rand() % 9];
                 uint32_t mCol = stalker.enragedTimer > 0.0f ? RED_GOAL_BRIGHT : (stalker.isChasing ? 0xFFBE123C : 0xFFF59E0B);
                 drawGlyphFine(miniStartX + mX, miniStartY + mY, gChar, mCol);
@@ -1790,7 +1907,6 @@ public:
         drawTextStandard(34, 12, "==============================", TIER_HIGH_BRIGHT);
         drawTextStandard(34, 14, "     WALK ASCII 3D HORROR     ", TIER_HIGH_BRIGHT);
         drawTextStandard(34, 16, "==============================", TIER_HIGH_BRIGHT);
-        
 
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
