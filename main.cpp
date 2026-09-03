@@ -31,7 +31,6 @@ const std::vector<ResolutionPreset> RESOLUTION_PRESETS = {
 };
 
 constexpr double FIXED_TIMESTEP = 1000.0 / 60.0;
-
 constexpr int MAP_W = 27;
 constexpr int MAP_H = 27;
 
@@ -69,19 +68,8 @@ constexpr uint32_t RED_GOAL_DARK    = 0xFFBE123C;
 constexpr int AUDIO_SAMPLE_RATE = 44100;
 constexpr int AUDIO_BUFFER_SIZE = 1024;
 
-enum GameState {
-    STATE_TITLE,
-    STATE_PLAYING,
-    STATE_PAUSED,
-    STATE_JUMPSCARE,
-    STATE_SUCCESS,
-    STATE_GAMEOVER
-};
-
-enum Difficulty {
-    DIFF_NORMAL = 0,
-    DIFF_EASY   = 1
-};
+enum GameState { STATE_TITLE, STATE_PLAYING, STATE_PAUSED, STATE_JUMPSCARE, STATE_SUCCESS, STATE_GAMEOVER };
+enum Difficulty { DIFF_NORMAL = 0, DIFF_EASY = 1 };
 
 enum ItemType {
     ITEM_NONE,
@@ -91,8 +79,7 @@ enum ItemType {
 };
 
 struct ItemEntity {
-    float x;
-    float y;
+    float x, y;
     ItemType type;
 };
 
@@ -134,28 +121,23 @@ const uint8_t FONT_8X8[96][8] = {
     {0xC6,0xC6,0x6C,0x38,0x6C,0xC6,0xC6,0x00}, {0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00},
     {0xFE,0xC6,0x8C,0x18,0x32,0x66,0xFE,0x00}, {0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00},
     {0xC0,0x60,0x30,0x18,0x0C,0x06,0x02,0x00}, {0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00},
-    // NOTE: the table above only covered ASCII 32-93 (space through ']'),
-    // leaving ^ _ ` a-z { | } ~ DEL zero-initialized (i.e. invisible).
-    // That silently blanked out lowercase HUD text (e.g. "Sprint", "Crouch",
-    // "v1.0") and several characters used directly by the ASCII-art sprites
-    // (the stalker/bread/meds art uses '_', '~', '|'). Filled in below.
-    {0x10,0x38,0x6C,0xC6,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF}, // ^ _
-    {0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00}, // ` a
-    {0xE0,0x60,0x60,0x7C,0x66,0x66,0xDC,0x00}, {0x00,0x00,0x78,0xCC,0xC0,0xCC,0x78,0x00}, // b c
-    {0x1C,0x0C,0x0C,0x7C,0xCC,0xCC,0x76,0x00}, {0x00,0x00,0x78,0xCC,0xFC,0xC0,0x78,0x00}, // d e
-    {0x38,0x6C,0x60,0xF0,0x60,0x60,0xF0,0x00}, {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0xF8}, // f g
-    {0xE0,0x60,0x6C,0x76,0x66,0x66,0xE6,0x00}, {0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00}, // h i
-    {0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3C}, {0xE0,0x60,0x66,0x6C,0x78,0x6C,0xE6,0x00}, // j k
-    {0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00}, {0x00,0x00,0xEC,0xFE,0xD6,0xD6,0xD6,0x00}, // l m
-    {0x00,0x00,0xDC,0x66,0x66,0x66,0x66,0x00}, {0x00,0x00,0x78,0xCC,0xCC,0xCC,0x78,0x00}, // n o
-    {0x00,0x00,0xDC,0x66,0x66,0x7C,0x60,0xF0}, {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0x1E}, // p q
-    {0x00,0x00,0xDC,0x76,0x66,0x60,0xF0,0x00}, {0x00,0x00,0x7C,0xC0,0x78,0x0C,0xF8,0x00}, // r s
-    {0x10,0x30,0x7C,0x30,0x30,0x34,0x18,0x00}, {0x00,0x00,0xCC,0xCC,0xCC,0xCC,0x76,0x00}, // t u
-    {0x00,0x00,0xCC,0xCC,0xCC,0x78,0x30,0x00}, {0x00,0x00,0xC6,0xD6,0xD6,0xFE,0x6C,0x00}, // v w
-    {0x00,0x00,0xC6,0x6C,0x38,0x6C,0xC6,0x00}, {0x00,0x00,0xC6,0xC6,0xC6,0x7E,0x06,0xFC}, // x y
-    {0x00,0x00,0xFC,0x98,0x30,0x64,0xFC,0x00}, {0x1C,0x30,0x30,0xE0,0x30,0x30,0x1C,0x00}, // z {
-    {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00}, {0xE0,0x30,0x30,0x1C,0x30,0x30,0xE0,0x00}, // | }
-    {0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}  // ~ DEL
+    {0x10,0x38,0x6C,0xC6,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF},
+    {0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00},
+    {0xE0,0x60,0x60,0x7C,0x66,0x66,0xDC,0x00}, {0x00,0x00,0x78,0xCC,0xC0,0xCC,0x78,0x00},
+    {0x1C,0x0C,0x0C,0x7C,0xCC,0xCC,0x76,0x00}, {0x00,0x00,0x78,0xCC,0xFC,0xC0,0x78,0x00},
+    {0x38,0x6C,0x60,0xF0,0x60,0x60,0xF0,0x00}, {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0xF8},
+    {0xE0,0x60,0x6C,0x76,0x66,0x66,0xE6,0x00}, {0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00},
+    {0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3C}, {0xE0,0x60,0x66,0x6C,0x78,0x6C,0xE6,0x00},
+    {0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00}, {0x00,0x00,0xEC,0xFE,0xD6,0xD6,0xD6,0x00},
+    {0x00,0x00,0xDC,0x66,0x66,0x66,0x66,0x00}, {0x00,0x00,0x78,0xCC,0xCC,0xCC,0x78,0x00},
+    {0x00,0x00,0xDC,0x66,0x66,0x7C,0x60,0xF0}, {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0x1E},
+    {0x00,0x00,0xDC,0x76,0x66,0x60,0xF0,0x00}, {0x00,0x00,0x7C,0xC0,0x78,0x0C,0xF8,0x00},
+    {0x10,0x30,0x7C,0x30,0x30,0x34,0x18,0x00}, {0x00,0x00,0xCC,0xCC,0xCC,0xCC,0x76,0x00},
+    {0x00,0x00,0xCC,0xCC,0xCC,0x78,0x30,0x00}, {0x00,0x00,0xC6,0xD6,0xD6,0xFE,0x6C,0x00},
+    {0x00,0x00,0xC6,0x6C,0x38,0x6C,0xC6,0x00}, {0x00,0x00,0xC6,0xC6,0xC6,0x7E,0x06,0xFC},
+    {0x00,0x00,0xFC,0x98,0x30,0x64,0xFC,0x00}, {0x1C,0x30,0x30,0xE0,0x30,0x30,0x1C,0x00},
+    {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00}, {0xE0,0x30,0x30,0x1C,0x30,0x30,0xE0,0x00},
+    {0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} 
 };
 
 struct Point { int x, y; };
@@ -186,7 +168,7 @@ struct AudioState {
     bool isSprinting = false;
     bool isCrouching = false;
     
-    uint32_t rngSeed = 1337; // Dedicated, thread-safe seed for audio
+    uint32_t rngSeed = 1337;
 };
 
 void audioCallback(void* userdata, Uint8* stream, int len) {
@@ -194,7 +176,6 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
     int16_t* buffer = reinterpret_cast<int16_t*>(stream);
     int samples = len / sizeof(int16_t);
 
-    // Private, thread-safe noise generator (Fast LCG algorithm)
     auto getAudioNoise = [](uint32_t& seed) -> float {
         seed = seed * 1664525 + 1013904223;
         return (static_cast<float>(seed >> 16) / 32768.0f) * 2.0f - 1.0f;
@@ -223,14 +204,12 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
         float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
 
-        // Smoothed Footstep Engine
         float footstep = 0.0f;
         if (audio->isMoving && !audio->isCrouching) {
             float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
             audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
             if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
             
-            // Replaces the harsh ON/OFF click with a curved envelope to sound like crunching gravel
             float stepEnv = std::max(0.0f, std::sin(audio->footstepPhase));
             stepEnv = std::pow(stepEnv, 6.0f); 
             footstep = getAudioNoise(audio->rngSeed) * stepEnv * 0.15f; 
@@ -257,76 +236,8 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
             audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
             if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
             
-            // Smoothly thread-safe monster breathing
             float breathEnv = std::sin(audio->monsterPhase) * 0.5f + 0.5f;
             monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixMonster;
-        }
-
-        buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
-    }
-}
-
-void audioCallback(void* userdata, Uint8* stream, int len) {
-    AudioState* audio = static_cast<AudioState*>(userdata);
-    int16_t* buffer = reinterpret_cast<int16_t*>(stream);
-    int samples = len / sizeof(int16_t);
-
-    for (int i = 0; i < samples; ++i) {
-        if (!audio->inGame && !audio->isJumpscare) {
-            buffer[i] = 0;
-            continue;
-        }
-
-        if (audio->isJumpscare) {
-            audio->screamPhase += (350.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
-            if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
-            float screech = std::sin(audio->screamPhase) * 0.5f;
-            float rawNoise = ((rand() % 2000) / 1000.0f - 1.0f) * 0.7f;
-            float demonicRumble = std::sin(audio->screamPhase * 0.1f) * 0.4f;
-            buffer[i] = static_cast<int16_t>(std::clamp(screech + rawNoise + demonicRumble, -1.0f, 1.0f) * 32767.0f);
-            continue;
-        }
-
-        float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
-        audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
-        if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
-        float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
-
-        float footstep = 0.0f;
-        if (audio->isMoving && !audio->isCrouching) {
-            float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
-            audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
-            if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
-            
-            float stepEnv = std::sin(audio->footstepPhase);
-            if (stepEnv > 0.85f) { 
-                float noise = ((rand() % 2000) / 1000.0f - 1.0f);
-                footstep = noise * 0.15f; 
-            }
-        } else {
-            audio->footstepPhase = 0.0f; 
-        }
-
-        float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
-        audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
-        if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
-
-        float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
-        float beatEnv = 0.0f;
-        float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
-        if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
-        else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
-        float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
-
-        float monsterAudio = 0.0f;
-        if (audio->monsterDist < 10.0f) {
-            float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
-            float proxVol = 1.0f - (audio->monsterDist / 10.0f);
-            float breathFreq = audio->isChasing ? 2.5f : 0.8f;
-            audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
-            if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
-            float noise = ((rand() % 2000) / 1000.0f - 1.0f);
-            monsterAudio = noise * (std::sin(audio->monsterPhase) * 0.5f + 0.5f) * proxVol * 0.4f * mixMonster;
         }
 
         buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
@@ -573,11 +484,6 @@ private:
         SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
     }
 
-    // Moves the stalker toward (dx,dy)*speed, resolving X and Y separately
-    // (like the player's own movement) so it can slide along a wall instead
-    // of freezing whenever the single diagonal target cell happens to be
-    // blocked. Indices are clamped so this is always a safe array access
-    // regardless of how far stalker.x/y have drifted.
     void moveStalkerToward(float dx, float dy, float dtSec) {
         float moveX = dx * stalker.speed * dtSec;
         float moveY = dy * stalker.speed * dtSec;
@@ -591,7 +497,7 @@ private:
         if (worldMap[nextTileY][curTileX].wallType == 0) stalker.y += moveY;
     }
 
-    uint32_t getElevationColor(float /*elevation*/, float dist, int side) {
+    uint32_t getElevationColor(float elevation, float dist, int side) {
         uint32_t cBright, cMid, cDark;
         float activeCorruption = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
 
@@ -872,10 +778,7 @@ public:
     bool init() {
         srand(static_cast<unsigned int>(time(nullptr)));
 
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) {
-            std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
-            return false;
-        }
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) return false;
 
         window = SDL_CreateWindow(
             "Walk ASCII 3D Horror",
@@ -884,30 +787,14 @@ public:
             RESOLUTION_PRESETS[currentResIndex].height,
             SDL_WINDOW_SHOWN
         );
-        if (!window) {
-            std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
-            return false;
-        }
 
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        if (!renderer) {
-            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-        }
-        if (!renderer) {
-            std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
-            return false;
-        }
-
         screenTexture = SDL_CreateTexture(
             renderer,
             SDL_PIXELFORMAT_ARGB8888,
             SDL_TEXTUREACCESS_STREAMING,
             NATIVE_WIDTH, NATIVE_HEIGHT
         );
-        if (!screenTexture) {
-            std::cerr << "SDL_CreateTexture failed: " << SDL_GetError() << "\n";
-            return false;
-        }
 
         pixelBuffer.resize(NATIVE_WIDTH * NATIVE_HEIGHT, 0xFF000000);
 
@@ -1280,7 +1167,7 @@ public:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-   void renderItems(const std::vector<float>& zBuffer) {
+    void renderItems(const std::vector<float>& zBuffer) {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         
         std::vector<std::pair<float, ItemEntity>> sortedItems;
@@ -1316,18 +1203,13 @@ public:
             int rowCount = activeSprite.size();
             int colCount = activeSprite[0].size();
             
-            // ==========================================
-            // PROPORTION CONTROLS:
-            // 1. HEIGHT: Lower divisor = Taller sprite
-            float heightDivisor = (item.type == ITEM_PEBBLE) ? 2.0f : 1.5f; 
+            float heightDivisor = (item.type == ITEM_PEBBLE) ? 4.0f : 1.5f; 
             int spriteHeight = std::abs(int(ROWS / transformY / heightDivisor)); 
             if (spriteHeight == 0) continue;
             
-            // 2. WIDTH: Lower multiplier = Thinner sprite
             float aspectMultiplier = 0.50f; 
             float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
             int spriteWidth = int(spriteHeight * aspect);
-            // ==========================================
 
             int drawStartY = screenY - spriteHeight;
             int drawEndY = screenY;
@@ -1349,8 +1231,6 @@ public:
 
                     char glyph = activeSprite[texY][texX];
                     
-                    // FIX: Only treat actual spaces (' ') as transparent! 
-                    // This stops the '.' shading in the rock from punching transparent holes in it.
                     if (glyph != ' ') {
                         drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
                         drawGlyphFine(stripe, y + vOffset, glyph, color);
@@ -1373,7 +1253,6 @@ public:
             }
         }
         
-        // Render Active Flying Projectile
         if (activePebble.active) {
             float spriteX = activePebble.x - player.posX;
             float spriteY = activePebble.y - player.posY;
@@ -1392,7 +1271,7 @@ public:
             }
         }
     }
-    
+
     void renderStalkerSprite(const std::vector<float>& zBuffer) {
         float spriteX = stalker.x - player.posX;
         float spriteY = stalker.y - player.posY;
