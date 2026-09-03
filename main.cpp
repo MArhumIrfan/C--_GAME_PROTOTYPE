@@ -1790,6 +1790,7 @@ public:
         drawTextStandard(34, 12, "==============================", TIER_HIGH_BRIGHT);
         drawTextStandard(34, 14, "     WALK ASCII 3D HORROR     ", TIER_HIGH_BRIGHT);
         drawTextStandard(34, 16, "==============================", TIER_HIGH_BRIGHT);
+        
 
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
