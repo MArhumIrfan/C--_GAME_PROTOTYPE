@@ -1317,17 +1317,18 @@ public:
             int colCount = activeSprite[0].size();
             
             // ==========================================
-            // TWEAK THIS NUMBER TO FIX THE STRETCHING
-            // Lower number (e.g. 0.25f) = Thinner Item
-            // Higher number (e.g. 0.60f) = Wider Item
-            // ==========================================
-            float aspectMultiplier = 0.35f; 
-            
-            float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
-            int spriteHeight = std::abs(int(ROWS / transformY / ((item.type == ITEM_PEBBLE) ? 4.0f : 2.5f))); 
+            // PROPORTION CONTROLS:
+            // 1. HEIGHT: Lower divisor = Taller sprite
+            float heightDivisor = (item.type == ITEM_PEBBLE) ? 2.0f : 1.5f; 
+            int spriteHeight = std::abs(int(ROWS / transformY / heightDivisor)); 
             if (spriteHeight == 0) continue;
             
+            // 2. WIDTH: Lower multiplier = Thinner sprite
+            float aspectMultiplier = 0.50f; 
+            float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
             int spriteWidth = int(spriteHeight * aspect);
+            // ==========================================
+
             int drawStartY = screenY - spriteHeight;
             int drawEndY = screenY;
             int drawStartX = screenX - spriteWidth / 2;
@@ -1347,7 +1348,10 @@ public:
                     if (texY < 0 || texY >= rowCount) continue;
 
                     char glyph = activeSprite[texY][texX];
-                    if (glyph != ' ' && glyph != '.') {
+                    
+                    // FIX: Only treat actual spaces (' ') as transparent! 
+                    // This stops the '.' shading in the rock from punching transparent holes in it.
+                    if (glyph != ' ') {
                         drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
                         drawGlyphFine(stripe, y + vOffset, glyph, color);
                     } else {
@@ -1358,7 +1362,7 @@ public:
                                 int ny = texY + dy; int nx = texX + dx;
                                 if (ny >= 0 && ny < rowCount && nx >= 0 && nx < colCount) {
                                     char n = activeSprite[ny][nx];
-                                    if (n != ' ' && n != '.') { nearGlyph = true; break; }
+                                    if (n != ' ') { nearGlyph = true; break; }
                                 }
                             }
                             if (nearGlyph) break;
