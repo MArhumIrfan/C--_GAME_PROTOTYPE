@@ -1,3 +1,4 @@
+
 #include <SDL2/SDL.h>
 #include <iostream>
 #include <vector>
@@ -9,12 +10,12 @@
 #include <ctime>
 #include <stack>
 
-constexpr int CHAR_W = 6;
-constexpr int CHAR_H = 6;
-constexpr int TOTAL_COLS = 133; 
-constexpr int ROWS = 80;         
-constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;  
-constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;       
+constexpr int CHAR_W = 8;
+constexpr int CHAR_H = 8;
+constexpr int TOTAL_COLS = 133;
+constexpr int ROWS = 80;
+constexpr int NATIVE_WIDTH = TOTAL_COLS * CHAR_W;
+constexpr int NATIVE_HEIGHT = ROWS * CHAR_H;
 
 struct ResolutionPreset {
     int width;
@@ -135,7 +136,7 @@ const uint8_t FONT_8X8[96][8] = {
 };
 
 struct Point { int x, y; };
-struct MapCell { int wallType = 0; float floorH = 0.0f; float ceilH = 2.0f; bool isStairs = false; };
+struct MapCell { int wallType = 0; };
 
 // ==========================================
 // AUDIO SYSTEM
@@ -164,6 +165,7 @@ struct AudioState {
     bool isCrouching = false;
     
     uint32_t rngSeed = 1337;
+    float masterVolume = 0.5f;
 };
 
 void audioCallback(void* userdata, Uint8* stream, int len) {
@@ -183,84 +185,86 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
             continue;
         }
 
+        float finalSample = 0.0f;
+
         if (audio->isJumpscare) {
             audio->screamPhase += (350.0f * 2.0f * 3.14159265f) * sampleDt;
             if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
             float screech = std::sin(audio->screamPhase) * 0.5f;
             float rawNoise = getAudioNoise(audio->rngSeed) * 0.7f;
             float demonicRumble = std::sin(audio->screamPhase * 0.1f) * 0.4f;
-            buffer[i] = static_cast<int16_t>(std::clamp(screech + rawNoise + demonicRumble, -1.0f, 1.0f) * 32767.0f);
-            continue;
-        }
-
-        float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
-        audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) * sampleDt;
-        if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
-        float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
-
-        float footstep = 0.0f;
-        if (audio->isMoving && !audio->isCrouching) {
-            float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
-            audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) * sampleDt;
-            if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
-            float stepEnv = std::max(0.0f, std::sin(audio->footstepPhase));
-            stepEnv = std::pow(stepEnv, 6.0f); 
-            footstep = getAudioNoise(audio->rngSeed) * stepEnv * 0.15f; 
+            finalSample = screech + rawNoise + demonicRumble;
         } else {
-            audio->footstepPhase = 0.0f; 
+            float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
+            audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) * sampleDt;
+            if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
+            float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
+
+            float footstep = 0.0f;
+            if (audio->isMoving && !audio->isCrouching) {
+                float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
+                audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) * sampleDt;
+                if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
+                float stepEnv = std::max(0.0f, std::sin(audio->footstepPhase));
+                stepEnv = std::pow(stepEnv, 6.0f); 
+                footstep = getAudioNoise(audio->rngSeed) * stepEnv * 0.15f; 
+            } else {
+                audio->footstepPhase = 0.0f; 
+            }
+
+            float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
+            audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) * sampleDt;
+            if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
+            float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
+            float beatEnv = 0.0f;
+            float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
+            if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
+            else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
+            float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
+
+            float monsterAudio = 0.0f;
+            if (audio->isChasing || audio->closestEnemyDist < 15.0f) {
+                float proxVol = std::max(0.0f, 1.0f - (audio->closestEnemyDist / 15.0f));
+                float breathFreq = audio->isChasing ? 2.5f : 0.8f;
+                audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) * sampleDt;
+                if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
+                float breathEnv = std::sin(audio->monsterPhase) * 0.5f + 0.5f;
+                monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixAmbient;
+            }
+
+            float itemSound = 0.0f;
+            if (audio->itemSoundTimer > 0.0f) {
+                audio->itemSoundTimer -= sampleDt;
+                audio->itemSoundPhase += sampleDt;
+                float t = audio->itemSoundPhase;
+
+                if (audio->itemSoundType == 1) { // Pebble
+                    float env = 0.0f;
+                    if (t < 0.05f) env = std::exp(-t * 100.0f);
+                    else if (t > 0.1f && t < 0.15f) env = std::exp(-(t - 0.1f) * 100.0f);
+                    float wave = std::sin(t * 2.0f * 3.14159f * 2500.0f);
+                    itemSound = wave * env * 0.4f;
+                }
+                else if (audio->itemSoundType == 2) { // Meds
+                    float env = std::exp(-t * 8.0f);
+                    float wave = std::sin(t * 2.0f * 3.14159f * 1800.0f);
+                    itemSound = wave * env * 0.4f;
+                }
+                else if (audio->itemSoundType == 3) { // Bread
+                    float env = std::exp(-t * 12.0f);
+                    float noise = getAudioNoise(audio->rngSeed);
+                    float wave = std::sin(t * 2.0f * 3.14159f * 100.0f);
+                    itemSound = (noise * 0.4f + wave * 0.6f) * env * 0.4f;
+                }
+                else if (audio->itemSoundType == 4) { // Lantern
+                    float env = std::exp(-t * 30.0f);
+                    itemSound = getAudioNoise(audio->rngSeed) * env * 0.6f;
+                }
+            }
+            finalSample = ambient + footstep + heartbeat + monsterAudio + itemSound;
         }
 
-        float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
-        audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) * sampleDt;
-        if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
-        float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
-        float beatEnv = 0.0f;
-        float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
-        if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
-        else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
-        float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
-
-        float monsterAudio = 0.0f;
-        if (audio->isChasing || audio->closestEnemyDist < 15.0f) {
-            float proxVol = std::max(0.0f, 1.0f - (audio->closestEnemyDist / 15.0f));
-            float breathFreq = audio->isChasing ? 2.5f : 0.8f;
-            audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) * sampleDt;
-            if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
-            float breathEnv = std::sin(audio->monsterPhase) * 0.5f + 0.5f;
-            monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixAmbient;
-        }
-
-        float itemSound = 0.0f;
-        if (audio->itemSoundTimer > 0.0f) {
-            audio->itemSoundTimer -= sampleDt;
-            audio->itemSoundPhase += sampleDt;
-            float t = audio->itemSoundPhase;
-
-            if (audio->itemSoundType == 1) { // Pebble
-                float env = 0.0f;
-                if (t < 0.05f) env = std::exp(-t * 100.0f);
-                else if (t > 0.1f && t < 0.15f) env = std::exp(-(t - 0.1f) * 100.0f);
-                float wave = std::sin(t * 2.0f * 3.14159f * 2500.0f);
-                itemSound = wave * env * 0.4f;
-            }
-            else if (audio->itemSoundType == 2) { // Meds
-                float env = std::exp(-t * 8.0f);
-                float wave = std::sin(t * 2.0f * 3.14159f * 1800.0f);
-                itemSound = wave * env * 0.4f;
-            }
-            else if (audio->itemSoundType == 3) { // Bread
-                float env = std::exp(-t * 12.0f);
-                float noise = getAudioNoise(audio->rngSeed);
-                float wave = std::sin(t * 2.0f * 3.14159f * 100.0f);
-                itemSound = (noise * 0.4f + wave * 0.6f) * env * 0.4f;
-            }
-            else if (audio->itemSoundType == 4) { // Lantern
-                float env = std::exp(-t * 30.0f);
-                itemSound = getAudioNoise(audio->rngSeed) * env * 0.6f;
-            }
-        }
-
-        buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio + itemSound, -1.0f, 1.0f) * 32767.0f);
+        buffer[i] = static_cast<int16_t>(std::clamp(finalSample * audio->masterVolume, -1.0f, 1.0f) * 32767.0f);
     }
 }
 
@@ -299,10 +303,8 @@ private:
     struct Player {
         float posX = 1.5f;
         float posY = 1.5f;
-        float posZ = 0.0f;
-        float targetPosZ = 0.0f;
-        float eyeHeight = 0.5f;
-        float targetEyeHeight = 0.5f;
+        float eyeHeight = 0.8f;
+        float targetEyeHeight = 0.8f;
         float pitch = 0.0f;
         float dirX = 1.0f;
         float dirY = 0.0f;
@@ -310,7 +312,7 @@ private:
         float planeY = 0.66f;
         float baseMoveSpeed = 3.2f;
         float moveSpeed = 3.2f;
-        float mouseSensitivity = 0.0022f;
+        float mouseSensitivity = 0.5f;
         int forward = 0; 
         int strafe = 0;  
         bool isSprinting = false;
@@ -398,16 +400,16 @@ private:
     const std::vector<std::string> spritePebble = {
         "    _----------_,                 ",
         "    ,\"__         _-:,             ",
-        "   /    \"\"--_--\"\"...:\\            ",
-        "  /         |.........\\           ",
-        " /          |..........\\          ",
+        "   /    \"\"--_--\"\"...:\\\\            ",
+        "  /         |.........\\\\           ",
+        " /          |..........\\\\          ",
         "/,         _'_........./:         ",
         "! -,    _-\"   \"-_... ,;;:         ",
-        "\\   -_-\"         \"-_/;;;;         ",
-        " \\   \\             /;;;;'         ",
-        "  \\   \\           /;;;;           ",
-        "   '.  \\         /;;;'            ",
-        "     \"-_\\_______/;;'              "
+        "\\\\   -_-\"         \"-_/;;;;         ",
+        " \\\\   \\\\             /;;;;'         ",
+        "  \\\\   \\\\           /;;;;           ",
+        "   '.  \\\\         /;;;'            ",
+        "     \"-_\\\\_______/;;'              "
     };
 
     // THE STALKER (Tall Figure)
@@ -557,6 +559,11 @@ private:
 
     void setCaptureMouse(bool capture) {
         SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
+        if (capture) {
+            SDL_EventState(SDL_MOUSEMOTION, SDL_ENABLE);
+        } else {
+            SDL_EventState(SDL_MOUSEMOTION, SDL_DISABLE);
+        }
     }
 
     void moveEnemyToward(Enemy& e, float dx, float dy, float dtSec) {
@@ -582,7 +589,9 @@ private:
     }
 
     float calculateVisibility(int col, int row, float dist, int viewWidth, float pitch) {
-        if (currentLevel < 2) return 1.0f; 
+        if (currentLevel >= 2 && currentLevel <= 5) {
+             return std::max(0.3f, 1.0f - dist / 15.0f);
+        }
 
         float lightCenterY = (ROWS / 2.0f) - (pitch * 0.5f); 
         float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
@@ -608,7 +617,7 @@ private:
         return calculateVisibility(col, row, dist, viewWidth, pitch) > 0.02f;
     }
 
-    uint32_t getElevationColor(float elevation, float dist, int side) {
+    uint32_t getWallColor(float dist, int side, float rayDirY) {
         uint32_t cBright, cMid, cDark;
         float activeCorruption = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
 
@@ -623,19 +632,26 @@ private:
         }
 
         if (activeCorruption >= 0.4f && (rand() % 100) < int(activeCorruption * 5)) return CORRUPT_BRIGHT;
-        if (dist < 3.0f)       return (side == 0) ? cBright : cMid;
-        else if (dist < 6.5f)  return (side == 0) ? cMid : cDark;
-        else                   return cDark;
+        
+        if (side == 0) { // East-West wall
+            if (dist < 3.0f) return cBright;
+            if (dist < 6.5f) return cMid;
+            return cDark;
+        } else { // North-South wall
+            if (dist < 3.0f) return cMid;
+            return cDark;
+        }
     }
 
     bool isMapVisible(float mapX, float mapY) {
-        if (currentLevel < 2) return true; 
+        if (currentLevel < 2) return true;
         
         float dx = mapX - player.posX;
         float dy = mapY - player.posY;
         float dist = std::hypot(dx, dy);
         
-        if (dist <= 1.2f) return true; 
+        float visibilityRadius = (currentLevel >= 2 && currentLevel <= 5) ? 6.0f : 2.5f;
+        if (dist <= visibilityRadius) return true;
         
         if (player.lanternOn && dist <= 14.0f) {
             float angle = std::atan2(dy, dx);
@@ -655,9 +671,6 @@ private:
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
                 worldMap[r][c].wallType = 1;
-                worldMap[r][c].floorH = 0.0f;
-                worldMap[r][c].ceilH = 2.0f;
-                worldMap[r][c].isStairs = false;
             }
         }
 
@@ -691,48 +704,13 @@ private:
             }
         }
 
-        int highZoneX = (rand() % 2 == 0) ? (MAP_W / 2) : 1;
-        int highZoneY = (rand() % 2 == 0) ? (MAP_H / 2) : 1;
-        int zoneW = MAP_W / 2;
-        int zoneH = MAP_H / 2;
-
-        for (int y = highZoneY; y < highZoneY + zoneH; ++y) {
-            for (int x = highZoneX; x < highZoneX + zoneW; ++x) {
-                if (worldMap[y][x].wallType == 0) {
-                    worldMap[y][x].floorH = 1.0f;
-                    worldMap[y][x].ceilH = 3.2f;
-                }
-            }
-        }
-
-        for (int y = 1; y < MAP_H - 1; ++y) {
-            for (int x = 1; x < MAP_W - 1; ++x) {
-                if (worldMap[y][x].wallType == 0 && worldMap[y][x].floorH == 1.0f) {
-                    const int nx[4] = { 1, -1, 0, 0 };
-                    const int ny[4] = { 0, 0, 1, -1 };
-                    for (int i = 0; i < 4; ++i) {
-                        int adjX = x + nx[i];
-                        int adjY = y + ny[i];
-                        if (worldMap[adjY][adjX].wallType == 0 && worldMap[adjY][adjX].floorH == 0.0f) {
-                            worldMap[y][x].floorH = 0.5f;
-                            worldMap[y][x].isStairs = true;
-                            break; 
-                        }
-                    }
-                }
-            }
-        }
-
         std::vector<Point> potentialVents;
         std::vector<Point> emptyFloorSpaces;
         for (int y = 1; y < MAP_H - 1; ++y) {
             for (int x = 1; x < MAP_W - 1; ++x) {
                 if (worldMap[y][x].wallType == 1) {
-                    bool horiz = (worldMap[y][x-1].wallType == 0 && worldMap[y][x+1].wallType == 0 
-                                  && worldMap[y][x-1].floorH < 0.5f && worldMap[y][x+1].floorH < 0.5f);
-                    bool vert  = (worldMap[y-1][x].wallType == 0 && worldMap[y+1][x].wallType == 0 
-                                  && worldMap[y-1][x].floorH < 0.5f && worldMap[y+1][x].floorH < 0.5f);
-                    
+                    bool horiz = (worldMap[y][x-1].wallType == 0 && worldMap[y][x+1].wallType == 0);
+                    bool vert  = (worldMap[y-1][x].wallType == 0 && worldMap[y+1][x].wallType == 0);
                     if (horiz || vert) potentialVents.push_back({x, y});
                 }
                 if (worldMap[y][x].wallType == 0) emptyFloorSpaces.push_back({x, y});
@@ -744,8 +722,6 @@ private:
             int idx = rand() % potentialVents.size();
             Point v = potentialVents[idx];
             worldMap[v.y][v.x].wallType = 3;
-            worldMap[v.y][v.x].floorH = 0.0f; 
-            worldMap[v.y][v.x].ceilH = 2.0f;
             potentialVents[idx] = potentialVents.back();
             potentialVents.pop_back();
             numVents--;
@@ -776,8 +752,6 @@ private:
 
         player.posX = startPos.x + 0.5f;
         player.posY = startPos.y + 0.5f;
-        player.posZ = 0.0f;
-        player.targetPosZ = 0.0f;
         player.pitch = 0.0f;
         player.dirX = 1.0f;
         player.dirY = 0.0f;
@@ -804,21 +778,20 @@ private:
         mistEnemy.mode = 0;
         mistEnemy.isChasing = false;
         
-        // ESCALATION AI
         if (currentLevel <= 5) {
             corruptionLevel = 0.0f;
         } else if (currentLevel <= 11) {
             corruptionLevel = std::min(1.0f, (currentLevel - 5) * 0.1f);
             stalker.active = (rand() % 100 < 30);
-            stalker.mode = 1; // Watcher
+            stalker.mode = 1;
         } else if (currentLevel <= 15) {
             corruptionLevel = std::min(1.0f, (currentLevel - 5) * 0.1f);
             mistEnemy.active = true;
-            mistEnemy.mode = 1; // Passive toxic fog
+            mistEnemy.mode = 1;
         } else {
             corruptionLevel = 1.0f;
             stalker.active = true;
-            stalker.mode = 2; // Hunter
+            stalker.mode = 2;
         }
     }
 
@@ -978,7 +951,7 @@ public:
             if (event.type == SDL_QUIT) isRunning = false;
 
             if (currentState == STATE_PLAYING && event.type == SDL_MOUSEMOTION) {
-                float rotAngle = event.motion.xrel * player.mouseSensitivity;
+                float rotAngle = event.motion.xrel * (0.0005f + player.mouseSensitivity * 0.004f);
 
                 float oldDirX = player.dirX;
                 player.dirX = player.dirX * cos(rotAngle) - player.dirY * sin(rotAngle);
@@ -991,28 +964,62 @@ public:
                 player.pitch -= event.motion.yrel * 0.12f;
                 player.pitch = std::clamp(player.pitch, -22.0f, 22.0f);
             }
+            
+            if (currentState == STATE_TITLE) {
+                if (event.type == SDL_MOUSEBUTTONDOWN) {
+                    int x, y;
+                    SDL_GetMouseState(&x, &y);
+                    int windowW, windowH;
+                    SDL_GetWindowSize(window, &windowW, &windowH);
+
+                    float yRatio = (float)y / windowH;
+                    if (yRatio > 0.45f && yRatio < 0.9f) {
+                        int selected = (int)((yRatio - 0.45f) / 0.1f);
+                        if (selected >= 0 && selected < 6) {
+                            menuCursor = selected;
+                            if (event.button.button == SDL_BUTTON_LEFT) {
+                                // Simulate Enter press
+                                SDL_Event keyEvent;
+                                keyEvent.type = SDL_KEYDOWN;
+                                keyEvent.key.keysym.sym = SDLK_RETURN;
+                                SDL_PushEvent(&keyEvent);
+                            }
+                        }
+                    }
+                }
+            }
 
             if (event.type == SDL_KEYDOWN) {
                 if (currentState == STATE_TITLE) {
-                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) menuCursor = (menuCursor - 1 + 4) % 4;
-                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) menuCursor = (menuCursor + 1) % 4;
+                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) menuCursor = (menuCursor - 1 + 6) % 6;
+                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) menuCursor = (menuCursor + 1) % 6;
                     
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
                         if (menuCursor == 0) startNewGame();
                         else if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
-                        else if (menuCursor == 2) {
+                        else if (menuCursor == 2) { /* Volume handled by left/right */ }
+                        else if (menuCursor == 3) { /* Sensitivity handled by left/right */ }
+                        else if (menuCursor == 4) {
                             currentResIndex = (currentResIndex + 1) % RESOLUTION_PRESETS.size();
                             updateWindowScale();
                         }
-                        else if (menuCursor == 3) isRunning = false;
+                        else if (menuCursor == 5) isRunning = false;
                     }
-                    if (event.key.keysym.sym == SDLK_LEFT || event.key.keysym.sym == SDLK_RIGHT) {
+                    if (event.key.keysym.sym == SDLK_LEFT || event.key.keysym.sym == SDLK_a) {
                         if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
-                        if (menuCursor == 2) {
-                            int count = RESOLUTION_PRESETS.size();
-                            currentResIndex = (event.key.keysym.sym == SDLK_RIGHT)
-                                ? ((currentResIndex + 1) % count)
-                                : ((currentResIndex - 1 + count) % count);
+                        if (menuCursor == 2) audioState.masterVolume = std::max(0.0f, audioState.masterVolume - 0.05f);
+                        if (menuCursor == 3) player.mouseSensitivity = std::max(0.0f, player.mouseSensitivity - 0.05f);
+                        if (menuCursor == 4) {
+                             currentResIndex = (currentResIndex - 1 + RESOLUTION_PRESETS.size()) % RESOLUTION_PRESETS.size();
+                             updateWindowScale();
+                        }
+                    }
+                    if (event.key.keysym.sym == SDLK_RIGHT || event.key.keysym.sym == SDLK_d) {
+                        if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
+                        if (menuCursor == 2) audioState.masterVolume = std::min(1.0f, audioState.masterVolume + 0.05f);
+                        if (menuCursor == 3) player.mouseSensitivity = std::min(1.0f, player.mouseSensitivity + 0.05f);
+                        if (menuCursor == 4) {
+                            currentResIndex = (currentResIndex + 1) % RESOLUTION_PRESETS.size();
                             updateWindowScale();
                         }
                     }
@@ -1080,7 +1087,7 @@ public:
                                 Projectile proj;
                                 proj.x = player.posX;
                                 proj.y = player.posY;
-                                proj.z = player.posZ + player.eyeHeight;
+                                proj.z = player.eyeHeight;
                                 proj.vx = player.dirX * 6.0f;
                                 proj.vy = player.dirY * 6.0f;
                                 proj.vz = 2.5f + (player.pitch / 22.0f) * 2.0f;
@@ -1101,7 +1108,7 @@ public:
                                 
                                 if (type == ITEM_PEBBLE) {
                                     Projectile proj;
-                                    proj.x = player.posX; proj.y = player.posY; proj.z = player.posZ + player.eyeHeight;
+                                    proj.x = player.posX; proj.y = player.posY; proj.z = player.eyeHeight;
                                     proj.vx = player.dirX * 6.0f; proj.vy = player.dirY * 6.0f; proj.vz = 2.5f + (player.pitch / 22.0f) * 2.0f;
                                     proj.type = type; proj.active = true;
                                     activeProjectiles.push_back(proj);
@@ -1173,13 +1180,13 @@ public:
 
             if (player.isCrouching) {
                 player.moveSpeed = player.baseMoveSpeed * 0.45f;
-                player.targetEyeHeight = 0.25f;
+                player.targetEyeHeight = 0.45f;
             } else if (player.isSprinting) {
                 player.moveSpeed = player.baseMoveSpeed * 1.75f;
-                player.targetEyeHeight = 0.50f;
+                player.targetEyeHeight = 0.8f;
             } else {
                 player.moveSpeed = player.baseMoveSpeed;
-                player.targetEyeHeight = 0.50f;
+                player.targetEyeHeight = 0.8f;
             }
         }
     }
@@ -1219,27 +1226,16 @@ public:
             float prevX = player.posX;
             float prevY = player.posY;
 
-            int currTileX = int(player.posX);
-            int currTileY = int(player.posY);
-            float currFloor = worldMap[currTileY][currTileX].floorH;
-
             int nextTileX = std::clamp(int(player.posX + moveX + bufX), 0, MAP_W - 1);
-            int nextTileY = std::clamp(int(player.posY + moveY + bufY), 0, MAP_H - 1);
+            int nextTileY = std::clamp(int(player.posY), 0, MAP_H - 1);
 
-            bool canMoveX = false;
-            int typeX = worldMap[currTileY][nextTileX].wallType;
-            if (typeX != 1 && (typeX != 3 || player.isCrouching)) {
-                float hDiff = std::abs(worldMap[currTileY][nextTileX].floorH - currFloor);
-                if (hDiff <= 1.1f) canMoveX = true;
-            }
+            bool canMoveX = (worldMap[nextTileY][nextTileX].wallType != 1 && (worldMap[nextTileY][nextTileX].wallType != 3 || player.isCrouching));
 
-            bool canMoveY = false;
-            int typeY = worldMap[nextTileY][currTileX].wallType;
-            if (typeY != 1 && (typeY != 3 || player.isCrouching)) {
-                float hDiff = std::abs(worldMap[nextTileY][currTileX].floorH - currFloor);
-                if (hDiff <= 1.1f) canMoveY = true;
-            }
-
+            nextTileX = std::clamp(int(player.posX), 0, MAP_W - 1);
+            nextTileY = std::clamp(int(player.posY + moveY + bufY), 0, MAP_H - 1);
+            
+            bool canMoveY = (worldMap[nextTileY][nextTileX].wallType != 1 && (worldMap[nextTileY][nextTileX].wallType != 3 || player.isCrouching));
+            
             if (canMoveX) player.posX += moveX;
             if (canMoveY) player.posY += moveY;
 
@@ -1264,13 +1260,8 @@ public:
         if (worldMap[int(player.posY)][int(player.posX)].wallType == 3) {
             player.isCrouching = true;
             player.moveSpeed = player.baseMoveSpeed * 0.45f;
-            player.targetEyeHeight = 0.25f;
+            player.targetEyeHeight = 0.45f;
         }
-
-        int standingX = int(player.posX);
-        int standingY = int(player.posY);
-        player.targetPosZ = worldMap[standingY][standingX].floorH;
-        player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
         for (auto& proj : activeProjectiles) {
             if (!proj.active) continue;
@@ -1296,12 +1287,8 @@ public:
                     proj.active = false;
                 }
             }
-
-            int px = std::clamp(int(proj.x), 0, MAP_W - 1);
-            int py = std::clamp(int(proj.y), 0, MAP_H - 1);
-            float floorH = worldMap[py][px].floorH;
             
-            if (proj.z <= floorH && proj.active) {
+            if (proj.z <= 0.0f && proj.active) {
                 proj.active = false;
                 
                 SDL_LockAudioDevice(audioDevice);
@@ -1325,9 +1312,6 @@ public:
         
         activeProjectiles.erase(std::remove_if(activeProjectiles.begin(), activeProjectiles.end(), [](const Projectile& p){ return !p.active; }), activeProjectiles.end());
 
-        // ==========================================
-        // ENEMY AI LOGIC
-        // ==========================================
         float closestDist = 20.0f;
 
         if (mistEnemy.active) {
@@ -1463,7 +1447,7 @@ public:
                 }
 
                 if (distToMonster < 1.0f) {
-                    stalker.active = false; // Vanishes
+                    stalker.active = false;
                 }
             }
         }
@@ -1483,7 +1467,7 @@ public:
             }
             currentState = STATE_GAMEOVER;
             setCaptureMouse(false);
-        } else if (standingX == endPos.x && standingY == endPos.y) {
+        } else if (int(player.posX) == endPos.x && int(player.posY) == endPos.y) {
             currentState = STATE_SUCCESS;
             setCaptureMouse(false);
         }
@@ -1508,8 +1492,7 @@ public:
     }
 
     void render3DView() {
-        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
-        float totalPlayerZ = player.posZ + player.eyeHeight;
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 100 : TOTAL_COLS;
         int horizon = int(ROWS / 2 + player.pitch);
         
         std::vector<float> zBuffer(viewWidth, 1e30f);
@@ -1532,26 +1515,11 @@ public:
             if (rayDirY < 0) { stepY = -1; sideDistY = (player.posY - mapY) * deltaDistY; }
             else             { stepY =  1; sideDistY = (mapY + 1.0f - player.posY) * deltaDistY; }
 
-            float prevFloorH = worldMap[mapY][mapX].floorH;
-            float stepRiserDist = -1.0f;
-            float stepFloorDiff = 0.0f;
-            bool hitStepRiser = false;
-            float stepElevation = 0.0f;
-
             while (hit == 0) {
                 if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
                 else                       { sideDistY += deltaDistY; mapY += stepY; side = 1; }
 
                 if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
-                    float currCellFloor = worldMap[mapY][mapX].floorH;
-                    if (!hitStepRiser && worldMap[mapY][mapX].wallType == 0 && std::abs(currCellFloor - prevFloorH) > 0.1f) {
-                        hitStepRiser = true;
-                        stepFloorDiff = currCellFloor - prevFloorH;
-                        stepRiserDist = (side == 0) ? (sideDistX - deltaDistX) : (sideDistY - deltaDistY);
-                        stepElevation = currCellFloor;
-                    }
-                    prevFloorH = currCellFloor;
-
                     if (worldMap[mapY][mapX].wallType > 0) hit = worldMap[mapY][mapX].wallType;
                 } else {
                     break;
@@ -1570,12 +1538,10 @@ public:
                 vOffset = (rand() % 5) - 2; 
             }
 
-            // 2-Pass Floor Projection to Fix "Walking on Air"
             for (int r = horizon + 1; r < ROWS; ++r) {
                 float p = r - horizon;
                 
-                float zDiff = totalPlayerZ;
-                float straightDist = (ROWS * zDiff) / p;
+                float straightDist = (ROWS * player.eyeHeight) / p;
                 
                 float currentFloorX = player.posX + rayDirX * straightDist;
                 float currentFloorY = player.posY + rayDirY * straightDist;
@@ -1583,37 +1549,14 @@ public:
                 int fTileX = std::clamp(int(currentFloorX), 0, MAP_W - 1);
                 int fTileY = std::clamp(int(currentFloorY), 0, MAP_H - 1);
 
-                float sampledFloorH = worldMap[fTileY][fTileX].floorH;
-                if (sampledFloorH > 0.01f) {
-                    zDiff = std::max(0.1f, totalPlayerZ - sampledFloorH);
-                    straightDist = (ROWS * zDiff) / p;
-                    currentFloorX = player.posX + rayDirX * straightDist;
-                    currentFloorY = player.posY + rayDirY * straightDist;
-                    fTileX = std::clamp(int(currentFloorX), 0, MAP_W - 1);
-                    fTileY = std::clamp(int(currentFloorY), 0, MAP_H - 1);
-                    sampledFloorH = worldMap[fTileY][fTileX].floorH;
-                }
-
                 float vis = calculateVisibility(col, r, straightDist, viewWidth, player.pitch);
                 if (vis <= 0.02f) continue;
                 
-                uint32_t floorColor = getElevationColor(sampledFloorH, straightDist, 0);
+                uint32_t floorColor = getWallColor(straightDist, 0, 0);
                 char floorGlyph = ' ';
                 
-                if (worldMap[fTileY][fTileX].isStairs) {
-                    floorGlyph = (int(straightDist * 3.0f) % 2 == 0) ? '=' : '_';
-                } 
-                else if (sampledFloorH > 0.8f) {
-                    bool isCheck = ((fTileX + fTileY) % 2 == 0);
-                    floorGlyph = isCheck ? '#' : '-';
-                    floorColor = isCheck ? TIER_HIGH_BRIGHT : TIER_HIGH_DARK;
-                    if (activeCorr >= 0.85f) floorColor = isCheck ? CORRUPT_BRIGHT : CORRUPT_DARK;
-                    if (straightDist > 6.0f && (col % 2 != 0)) floorGlyph = ' ';
-                } 
-                else {
-                    if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
-                        floorGlyph = '.';
-                    }
+                if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
+                    floorGlyph = '.';
                 }
 
                 if (activeCorr > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(activeCorr * 10)) {
@@ -1625,38 +1568,37 @@ public:
                     drawGlyphFine(col, r + vOffset, floorGlyph, finalFloorColor);
                 }
             }
-
-            float baseFloor = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].floorH : 0.0f;
-            float baseCeil  = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].ceilH : 2.0f;
-
+            
             char wallGlyph = ' ';
             uint32_t wallColor;
 
             if (hit == 2) {
                 wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
                 wallGlyph = (perpWallDist <= 2.50f) ? '#' : '%';
-            } 
-            else if (hit == 3) {
-                baseFloor += 0.5f;  
-                wallColor = getElevationColor(baseFloor, perpWallDist + 2.0f, side); 
+            } else if (hit == 3) {
+                wallColor = getWallColor(perpWallDist + 2.0f, side, rayDirY); 
                 wallGlyph = '#'; 
-            }
-            else {
-                wallColor = getElevationColor(baseFloor, perpWallDist, side);
-                if (perpWallDist <= 1.25f)      wallGlyph = '@';
-                else if (perpWallDist <= 2.50f) wallGlyph = '#';
-                else if (perpWallDist <= 4.00f) wallGlyph = '%';
-                else if (perpWallDist <= 5.80f) wallGlyph = '*';
-                else if (perpWallDist <= 7.50f) wallGlyph = '+';
-                else if (perpWallDist <= 9.00f) wallGlyph = '-';
-                else if (perpWallDist <= 11.0f) wallGlyph = '.';
+            } else {
+                wallColor = getWallColor(perpWallDist, side, rayDirY);
+                if (side == 1) { // North-South
+                    if (perpWallDist <= 2.50f) wallGlyph = ':';
+                    else if (perpWallDist <= 5.80f) wallGlyph = ';';
+                    else wallGlyph = '.';
+                } else { // East-West
+                    if (perpWallDist <= 1.25f)      wallGlyph = '@';
+                    else if (perpWallDist <= 2.50f) wallGlyph = '#';
+                    else if (perpWallDist <= 4.00f) wallGlyph = '%';
+                    else if (perpWallDist <= 5.80f) wallGlyph = '*';
+                    else if (perpWallDist <= 7.50f) wallGlyph = '+';
+                    else if (perpWallDist <= 9.00f) wallGlyph = '-';
+                    else if (perpWallDist <= 11.0f) wallGlyph = '.';
+                }
             }
 
             if (activeCorr > 0.3f && wallGlyph != ' ' && hit != 3 && (rand() % 100) < int(activeCorr * 10)) {
                 wallGlyph = "?!@#$%^&*"[rand() % 9];
             }
 
-            // EDGE DETECTION
             float wallX;
             if (side == 0) wallX = player.posY + perpWallDist * rayDirY;
             else           wallX = player.posX + perpWallDist * rayDirX;
@@ -1665,8 +1607,9 @@ public:
             float cornerShade = std::clamp(std::min(wallX, 1.0f - wallX) * 10.0f, 0.05f, 1.0f);
             bool isCorner = (wallX <= 0.035f || wallX >= 0.965f);
 
-            int drawStart = horizon - int(((baseCeil - totalPlayerZ) * ROWS) / perpWallDist);
-            int drawEnd   = horizon - int(((baseFloor - totalPlayerZ) * ROWS) / perpWallDist);
+            int lineHeight = int(ROWS / perpWallDist);
+            int drawStart = -lineHeight / 2 + horizon;
+            int drawEnd = lineHeight / 2 + horizon;
 
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
@@ -1687,27 +1630,6 @@ public:
                     }
                 }
             }
-
-            if (hitStepRiser && stepRiserDist > 0.1f && stepRiserDist < perpWallDist) {
-                float lowH = std::min(prevFloorH, prevFloorH + stepFloorDiff);
-                float highH = std::max(prevFloorH, prevFloorH + stepFloorDiff);
-
-                int stepTop = horizon - int(((highH - totalPlayerZ) * ROWS) / stepRiserDist);
-                int stepBottom = horizon - int(((lowH - totalPlayerZ) * ROWS) / stepRiserDist);
-
-                uint32_t stepColor = getElevationColor(stepElevation, stepRiserDist, 0);
-                char stepGlyph = (stepFloorDiff > 0) ? '=' : 'v';
-
-                for (int r = stepTop; r <= stepBottom; ++r) {
-                    if (r >= 0 && r < ROWS) {
-                        float vis = calculateVisibility(col, r, stepRiserDist, viewWidth, player.pitch);
-                        if (vis <= 0.02f) continue;
-                        
-                        uint32_t finalColor = applyShadow(stepColor, vis);
-                        drawGlyphFine(col, r + vOffset, stepGlyph, finalColor);
-                    }
-                }
-            }
         }
 
         renderItems(zBuffer);
@@ -1715,9 +1637,6 @@ public:
         if (stalker.active) renderEnemySprite(zBuffer, stalker, spriteStalker0, spriteStalker1);
         if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist1);
 
-        // ==========================================
-        // OVERLAY RENDER: RIPPLING FOG (LEVELS 12-15)
-        // ==========================================
         if (mistEnemy.active) {
             float distToMonster = std::hypot(player.posX - mistEnemy.x, player.posY - mistEnemy.y);
             float mistIntensity = std::clamp(1.0f - (distToMonster / 10.0f), 0.0f, 1.0f);
@@ -1751,21 +1670,8 @@ public:
 
         drawRectFilled(1, 1, 52, 15, 0xFF050505); 
 
-        std::string elevStr;
-        uint32_t elevColor;
-        if (player.posZ > 0.7f) {
-            elevStr = "OVERPASS [HIGH]";
-            elevColor = TIER_HIGH_BRIGHT;
-        } else if (player.posZ > 0.2f) {
-            elevStr = "STAIRS [MID]";
-            elevColor = TIER_MID_BRIGHT;
-        } else {
-            elevStr = "GROUND [LOW]";
-            elevColor = TIER_LOW_BRIGHT;
-        }
-
         std::string themeName = getCurrentThemeName();
-        drawTextFine(2, 2, "AREA: " + themeName + " | LVL: " + std::to_string(currentLevel), elevColor);
+        drawTextFine(2, 2, "AREA: " + themeName + " | LVL: " + std::to_string(currentLevel), TIER_HIGH_BRIGHT);
         
         if (corruptionLevel < 0.5f && player.toxicTimer <= 0.0f) {
             drawTextFine(2, 4, "TEST MAZE UTILITY v1.0", TIER_LOW_BRIGHT);
@@ -1799,7 +1705,7 @@ public:
     }
 
     void renderItems(const std::vector<float>& zBuffer) {
-        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 100 : TOTAL_COLS;
         
         std::vector<std::pair<float, ItemEntity>> sortedItems;
         for(const auto& it : itemsInWorld) {
@@ -1820,11 +1726,9 @@ public:
             if (transformY <= 0.2f) continue;
 
             int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
-            float floorH = worldMap[int(item.y)][int(item.x)].floorH;
-            float totalPlayerZ = player.posZ + player.eyeHeight;
             int horizon = int(ROWS / 2 + player.pitch);
             
-            int screenY = horizon - int(((floorH - totalPlayerZ) * ROWS) / transformY);
+            int vMoveScreen = int((player.eyeHeight / transformY));
             
             const std::vector<std::string>* activeSpritePtr = &spriteBread;
             if (item.type == ITEM_MEDS) activeSpritePtr = &spriteMeds;
@@ -1842,8 +1746,8 @@ public:
             float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
             int spriteWidth = int(spriteHeight * aspect);
 
-            int drawStartY = screenY - spriteHeight;
-            int drawEndY = screenY;
+            int drawStartY = -spriteHeight / 2 + horizon + vMoveScreen;
+            int drawEndY = spriteHeight / 2 + horizon + vMoveScreen;
             int drawStartX = screenX - spriteWidth / 2;
             int drawEndX = screenX + spriteWidth / 2;
 
@@ -1861,7 +1765,8 @@ public:
                     float vis = calculateVisibility(stripe, y, transformY, viewWidth, player.pitch);
                     if (vis <= 0.02f) continue;
                     
-                    int texY = int((y - drawStartY) * rowCount / spriteHeight);
+                    int d = (y - vMoveScreen) * 256 - ROWS * 128 + spriteHeight * 128;
+                    int texY = ((d * rowCount) / spriteHeight) / 256;
                     if (texY < 0 || texY >= rowCount) continue;
 
                     char glyph = activeSprite[texY][texX];
@@ -1897,9 +1802,10 @@ public:
 
             if (transformY > 0.2f) {
                 int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
-                float totalPlayerZ = player.posZ + player.eyeHeight;
                 int horizon = int(ROWS / 2 + player.pitch);
-                int screenY = horizon - int(((proj.z - totalPlayerZ) * ROWS) / transformY);
+                int vMoveScreen = int(((player.eyeHeight - proj.z) / transformY));
+                int screenY = horizon + vMoveScreen;
+
                 if (screenX >= 0 && screenX < viewWidth && transformY <= zBuffer[screenX] && screenY >= 0 && screenY < ROWS) {
                     float vis = calculateVisibility(screenX, screenY, transformY, viewWidth, player.pitch);
                     if (vis > 0.02f) {
@@ -1922,12 +1828,13 @@ public:
 
         if (transformY <= 0.2f) return;
 
-        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 100 : TOTAL_COLS;
         int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
 
+        int vMoveScreen = int(player.eyeHeight / transformY);
         int spriteHeight = std::abs(int(ROWS / transformY));
-        int drawStartY = -spriteHeight / 2 + ROWS / 2 + int(player.pitch);
-        int drawEndY = spriteHeight / 2 + ROWS / 2 + int(player.pitch);
+        int drawStartY = -spriteHeight / 2 + ROWS / 2 + vMoveScreen + int(player.pitch);
+        int drawEndY = spriteHeight / 2 + ROWS / 2 + vMoveScreen + int(player.pitch);
 
         int spriteWidth = std::abs(int(ROWS / transformY * 1.5f));
         int drawStartX = -spriteWidth / 2 + screenX;
@@ -1948,8 +1855,9 @@ public:
                 
                 float vis = calculateVisibility(stripe, y, transformY, viewWidth, player.pitch);
                 if (vis <= 0.02f) continue;
-
-                int texY = int((y - drawStartY) * rowCount / (drawEndY - drawStartY));
+                
+                int d = (y - vMoveScreen) * 256 - ROWS * 128 + spriteHeight * 128;
+                int texY = ((d * rowCount) / spriteHeight) / 256;
                 if (texY < 0 || texY >= rowCount) continue;
 
                 char glyph = currentSprite[texY][texX];
@@ -1962,7 +1870,7 @@ public:
     }
 
    void renderJumpscareScreen() {
-        const auto& currentSprite = spriteStalker0; // <--- FIXED: Now points to the correct Stalker sprite array
+        const auto& currentSprite = spriteStalker0;
         int rowCount = currentSprite.size();
         int colCount = currentSprite[0].size();
 
@@ -1997,10 +1905,21 @@ public:
     }
     
     void renderSidebarMinimap() {
-        for (int r = 0; r < ROWS; ++r) drawGlyphFine(68, r, '|', 0xFF334155);
+        for (int r = 0; r < ROWS; ++r) drawGlyphFine(100, r, '|', 0xFF334155);
 
-        int miniStartX = 72;
+        int miniStartX = 104;
         int miniStartY = 3;
+
+        float visibilityRadius = (currentLevel >= 2 && currentLevel <= 5) ? 6.0f : 2.5f;
+
+        for (int r = 0; r < MAP_H; ++r) {
+            for (int c = 0; c < MAP_W; ++c) {
+                float distToPlayer = std::hypot(c + 0.5f - player.posX, r + 0.5f - player.posY);
+                if (distToPlayer <= visibilityRadius) {
+                    drawRectFilled(miniStartX + c, miniStartY + r, 1, 1, 0xFF1E293B);
+                }
+            }
+        }
 
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
@@ -2013,8 +1932,6 @@ public:
                 else if (r == endPos.y && c == endPos.x) { mapCh = 'E'; mapCol = RED_GOAL_BRIGHT; } 
                 else if (worldMap[r][c].wallType == 1) { mapCh = '#'; mapCol = 0xFF475569; } 
                 else if (worldMap[r][c].wallType == 3) { mapCh = 'X'; mapCol = 0xFFF59E0B; } 
-                else if (worldMap[r][c].isStairs) { mapCh = '='; mapCol = TIER_MID_BRIGHT; } 
-                else if (worldMap[r][c].floorH > 0.7f) { mapCh = '^'; mapCol = TIER_HIGH_BRIGHT; } 
 
                 drawGlyphFine(miniStartX + c, miniStartY + r, mapCh, mapCol);
             }
@@ -2049,11 +1966,9 @@ public:
             drawGlyphFine(miniStartX + int(mistEnemy.x), miniStartY + int(mistEnemy.y), gChar, mCol);
         }
 
-        drawTextFine(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
-        drawTextFine(72, 34, "[=] Stairs (Mid)", TIER_MID_BRIGHT);
-        drawTextFine(72, 36, "[^] Overpass (High)", TIER_HIGH_BRIGHT);
-        drawTextFine(72, 38, "[X] Crawlspace Grate", 0xFFF59E0B);
-        drawTextFine(72, 40, "[S] Start  [E] End", 0xFF64748B);
+        drawTextFine(miniStartX, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
+        drawTextFine(miniStartX, 34, "[X] Crawlspace Grate", 0xFFF59E0B);
+        drawTextFine(miniStartX, 36, "[S] Start  [E] End", 0xFF64748B);
     }
 
     void renderTitleScreen() {
@@ -2064,14 +1979,33 @@ public:
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
 
-        std::string options[4] = { "START GAME", "DIFFICULTY: " + diffStr, "RESOLUTION: " + resStr, "QUIT GAME" };
+        auto renderSlider = [&](int y, const std::string& label, float value, bool selected) {
+            std::string bar = "[";
+            int barLength = 20;
+            int filled = static_cast<int>(value * barLength);
+            for (int i = 0; i < barLength; ++i) {
+                bar += (i < filled) ? "=" : "-";
+            }
+            bar += "]";
+            uint32_t col = selected ? TIER_HIGH_BRIGHT : 0xFF64748B;
+            drawTextStandard(32, y, label + bar, col);
+        };
+        
+        std::string options[6] = { "START GAME", "DIFFICULTY: " + diffStr, "VOLUME", "MOUSE SENSITIVITY", "RESOLUTION: " + resStr, "QUIT GAME" };
 
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 6; ++i) {
             uint32_t col = (i == menuCursor) ? TIER_HIGH_BRIGHT : 0xFF64748B;
             std::string prefix = (i == menuCursor) ? "-> " : "   ";
-            drawTextStandard(32, 24 + i * 4, prefix + options[i], col);
+            if (i == 2) {
+                renderSlider(24 + i * 4, prefix + options[i] + " ", audioState.masterVolume, i == menuCursor);
+            } else if (i == 3) {
+                 renderSlider(24 + i * 4, prefix + options[i] + " ", player.mouseSensitivity, i == menuCursor);
+            }
+            else {
+                drawTextStandard(32, 24 + i * 4, prefix + options[i], col);
+            }
         }
-        drawTextStandard(26, 44, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
+        drawTextStandard(26, 50, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
     }
 
     void renderPauseScreen() {
