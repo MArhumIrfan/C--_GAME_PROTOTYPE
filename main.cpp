@@ -86,6 +86,7 @@ struct ItemEntity {
 struct Projectile {
     float x, y, z;
     float vx, vy, vz;
+    ItemType type;
     bool active = false;
 };
 
@@ -137,7 +138,7 @@ const uint8_t FONT_8X8[96][8] = {
     {0x00,0x00,0xC6,0x6C,0x38,0x6C,0xC6,0x00}, {0x00,0x00,0xC6,0xC6,0xC6,0x7E,0x06,0xFC},
     {0x00,0x00,0xFC,0x98,0x30,0x64,0xFC,0x00}, {0x1C,0x30,0x30,0xE0,0x30,0x30,0x1C,0x00},
     {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00}, {0xE0,0x30,0x30,0x1C,0x30,0x30,0xE0,0x00},
-    {0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} 
+    {0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
 struct Point { int x, y; };
@@ -149,12 +150,19 @@ struct MapCell {
     bool isStairs = false;
 };
 
+// ==========================================
+// AUDIO SYSTEM (THREAD-SAFE)
+// ==========================================
 struct AudioState {
     float ambientPhase = 0.0f;
     float heartbeatPhase = 0.0f;
     float monsterPhase = 0.0f;
     float screamPhase = 0.0f;
     float footstepPhase = 0.0f;
+    
+    int itemSoundType = 0; // 0=None, 1=Pebble, 2=Meds, 3=Bread
+    float itemSoundTimer = 0.0f;
+    float itemSoundPhase = 0.0f;
     
     float sanity = 100.0f;
     float monsterDist = 20.0f;
@@ -175,6 +183,7 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
     AudioState* audio = static_cast<AudioState*>(userdata);
     int16_t* buffer = reinterpret_cast<int16_t*>(stream);
     int samples = len / sizeof(int16_t);
+    float sampleDt = 1.0f / AUDIO_SAMPLE_RATE;
 
     auto getAudioNoise = [](uint32_t& seed) -> float {
         seed = seed * 1664525 + 1013904223;
@@ -188,7 +197,7 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         }
 
         if (audio->isJumpscare) {
-            audio->screamPhase += (350.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            audio->screamPhase += (350.0f * 2.0f * 3.14159265f) * sampleDt;
             if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
             
             float screech = std::sin(audio->screamPhase) * 0.5f;
@@ -200,14 +209,14 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         }
 
         float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
-        audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) * sampleDt;
         if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
         float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
 
         float footstep = 0.0f;
         if (audio->isMoving && !audio->isCrouching) {
             float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
-            audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) * sampleDt;
             if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
             
             float stepEnv = std::max(0.0f, std::sin(audio->footstepPhase));
@@ -218,7 +227,7 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         }
 
         float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
-        audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) * sampleDt;
         if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
 
         float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
@@ -229,21 +238,49 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
 
         float monsterAudio = 0.0f;
-        if (audio->monsterDist < 10.0f) {
-            float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
-            float proxVol = 1.0f - (audio->monsterDist / 10.0f);
+        if (audio->isChasing || audio->monsterDist < 15.0f) {
+            float proxVol = std::max(0.0f, 1.0f - (audio->monsterDist / 15.0f));
             float breathFreq = audio->isChasing ? 2.5f : 0.8f;
-            audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) * sampleDt;
             if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
             
             float breathEnv = std::sin(audio->monsterPhase) * 0.5f + 0.5f;
-            monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixMonster;
+            monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixAmbient;
         }
 
-        buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
+        float itemSound = 0.0f;
+        if (audio->itemSoundTimer > 0.0f) {
+            audio->itemSoundTimer -= sampleDt;
+            audio->itemSoundPhase += sampleDt;
+            float t = audio->itemSoundPhase;
+
+            if (audio->itemSoundType == 1) { // Pebble
+                float env = 0.0f;
+                if (t < 0.05f) env = std::exp(-t * 100.0f);
+                else if (t > 0.1f && t < 0.15f) env = std::exp(-(t - 0.1f) * 100.0f);
+                float wave = std::sin(t * 2.0f * 3.14159f * 2500.0f);
+                itemSound = wave * env * 0.4f;
+            }
+            else if (audio->itemSoundType == 2) { // Meds
+                float env = std::exp(-t * 8.0f);
+                float wave = std::sin(t * 2.0f * 3.14159f * 1800.0f);
+                itemSound = wave * env * 0.4f;
+            }
+            else if (audio->itemSoundType == 3) { // Bread
+                float env = std::exp(-t * 12.0f);
+                float noise = getAudioNoise(audio->rngSeed);
+                float wave = std::sin(t * 2.0f * 3.14159f * 100.0f);
+                itemSound = (noise * 0.4f + wave * 0.6f) * env * 0.4f;
+            }
+        }
+
+        buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio + itemSound, -1.0f, 1.0f) * 32767.0f);
     }
 }
 
+// ==========================================
+// MAIN ENGINE CLASS
+// ==========================================
 class WalkAsciiElevationEngine {
 private:
     SDL_Window* window = nullptr;
@@ -264,7 +301,7 @@ private:
     Point endPos;
 
     std::vector<ItemEntity> itemsInWorld;
-    Projectile activePebble; 
+    std::vector<Projectile> activeProjectiles; 
 
     int currentLevel = 1;
     int totalSteps = 0;
@@ -377,7 +414,10 @@ private:
         float x = 12.5f;
         float y = 12.5f;
         float speed = 1.8f;
+        
+        int mode = 0; // 0=None, 1=Watcher, 2=Hunter
         bool isChasing = false;
+        
         float animTimer = 0.0f;
         int currentFrame = 0;
         float enragedTimer = 0.0f; 
@@ -520,7 +560,7 @@ private:
     void generateProceduralMultiLevelMaze() {
         srand(static_cast<unsigned int>(time(nullptr)) + currentLevel * 1337);
         itemsInWorld.clear();
-        activePebble.active = false;
+        activeProjectiles.clear(); 
 
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
@@ -661,13 +701,24 @@ private:
         stalker.isChasing = false;
         stalker.enragedTimer = 0.0f;
         stalker.investigateTimer = 0.0f;
+        
+        // Setup Escalation Engine based on Current Level
+        if (currentLevel <= 5) {
+            corruptionLevel = 0.0f;
+            stalker.mode = 0; // Disabled
+        } else if (currentLevel <= 15) {
+            corruptionLevel = std::min(1.0f, (currentLevel - 5) * 0.1f);
+            stalker.mode = (rand() % 100 < 30) ? 1 : 0; // 30% chance Watcher
+        } else {
+            corruptionLevel = 1.0f;
+            stalker.mode = 2; // Always Hunter
+        }
     }
 
     void startNewGame() {
         currentLevel = 1;
         totalSteps = 0;
         levelTime = 0.0f;
-        corruptionLevel = 0.0f; 
         player.sanity = 100.0f;
         player.health = 100.0f;
         
@@ -690,7 +741,6 @@ private:
         currentLevel++;
         player.sanity = std::min(100.0f, player.sanity + 30.0f);
         player.health = std::min(100.0f, player.health + 30.0f);
-        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.06f);
         generateProceduralMultiLevelMaze();
         currentState = STATE_PLAYING;
         setCaptureMouse(true);
@@ -836,8 +886,8 @@ public:
 
             if (event.type == SDL_KEYDOWN) {
                 if (currentState == STATE_TITLE) {
-                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) menuCursor = (menuCursor - 1 + 3) % 3;
-                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) menuCursor = (menuCursor + 1) % 3;
+                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) menuCursor = (menuCursor - 1 + 4) % 4;
+                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) menuCursor = (menuCursor + 1) % 4;
                     
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
                         if (menuCursor == 0) startNewGame();
@@ -846,6 +896,7 @@ public:
                             currentResIndex = (currentResIndex + 1) % RESOLUTION_PRESETS.size();
                             updateWindowScale();
                         }
+                        else if (menuCursor == 3) isRunning = false;
                     }
                     if (event.key.keysym.sym == SDLK_LEFT || event.key.keysym.sym == SDLK_RIGHT) {
                         if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
@@ -866,12 +917,26 @@ public:
                         audioState.inGame = false;
                         SDL_UnlockAudioDevice(audioDevice);
                     }
+                    else if (event.key.keysym.sym == SDLK_q) {
+                        currentState = STATE_TITLE;
+                        setCaptureMouse(false);
+                        SDL_LockAudioDevice(audioDevice);
+                        audioState.inGame = false;
+                        SDL_UnlockAudioDevice(audioDevice);
+                    }
                     else if (event.key.keysym.sym == SDLK_e) {
                         for (auto it = itemsInWorld.begin(); it != itemsInWorld.end(); ++it) {
                             if (std::hypot(player.posX - it->x, player.posY - it->y) < 1.5f) {
                                 for (int i = 0; i < 3; ++i) {
                                     if (player.inventory[i] == ITEM_NONE) {
                                         player.inventory[i] = it->type;
+                                        
+                                        SDL_LockAudioDevice(audioDevice);
+                                        audioState.itemSoundType = (it->type == ITEM_PEBBLE) ? 1 : ((it->type == ITEM_MEDS) ? 2 : 3);
+                                        audioState.itemSoundPhase = 0.0f;
+                                        audioState.itemSoundTimer = 0.5f;
+                                        SDL_UnlockAudioDevice(audioDevice);
+
                                         itemsInWorld.erase(it);
                                         break;
                                     }
@@ -882,24 +947,42 @@ public:
                     }
                     else if (event.key.keysym.sym >= SDLK_1 && event.key.keysym.sym <= SDLK_3) {
                         int slot = event.key.keysym.sym - SDLK_1;
-                        bool dropping = (SDL_GetModState() & KMOD_SHIFT);
+                        bool throwing = (SDL_GetModState() & KMOD_SHIFT);
                         
                         if (player.inventory[slot] != ITEM_NONE) {
-                            if (dropping) {
-                                itemsInWorld.push_back({player.posX, player.posY, player.inventory[slot]});
+                            if (throwing) {
+                                Projectile proj;
+                                proj.x = player.posX;
+                                proj.y = player.posY;
+                                proj.z = player.posZ + player.eyeHeight;
+                                proj.vx = player.dirX * 6.0f;
+                                proj.vy = player.dirY * 6.0f;
+                                proj.vz = 2.5f + (player.pitch / 22.0f) * 2.0f;
+                                proj.type = player.inventory[slot];
+                                proj.active = true;
+                                activeProjectiles.push_back(proj);
+                                
+                                SDL_LockAudioDevice(audioDevice);
+                                audioState.itemSoundType = (proj.type == ITEM_PEBBLE) ? 1 : ((proj.type == ITEM_MEDS) ? 2 : 3);
+                                audioState.itemSoundPhase = 0.0f;
+                                audioState.itemSoundTimer = 0.5f;
+                                SDL_UnlockAudioDevice(audioDevice);
+
                                 player.inventory[slot] = ITEM_NONE;
                             } else {
                                 ItemType type = player.inventory[slot];
                                 player.inventory[slot] = ITEM_NONE;
                                 
                                 if (type == ITEM_PEBBLE) {
-                                    activePebble.x = player.posX;
-                                    activePebble.y = player.posY;
-                                    activePebble.z = player.posZ + player.eyeHeight;
-                                    activePebble.vx = player.dirX * 6.0f;
-                                    activePebble.vy = player.dirY * 6.0f;
-                                    activePebble.vz = 2.5f + (player.pitch / 22.0f) * 2.0f;
-                                    activePebble.active = true;
+                                    Projectile proj;
+                                    proj.x = player.posX; proj.y = player.posY; proj.z = player.posZ + player.eyeHeight;
+                                    proj.vx = player.dirX * 6.0f; proj.vy = player.dirY * 6.0f; proj.vz = 2.5f + (player.pitch / 22.0f) * 2.0f;
+                                    proj.type = type; proj.active = true;
+                                    activeProjectiles.push_back(proj);
+                                    
+                                    SDL_LockAudioDevice(audioDevice);
+                                    audioState.itemSoundType = 1; audioState.itemSoundPhase = 0.0f; audioState.itemSoundTimer = 0.5f;
+                                    SDL_UnlockAudioDevice(audioDevice);
                                 } else if (type == ITEM_BREAD) {
                                     player.health = std::min(100.0f, player.health + 40.0f);
                                     stalker.enragedTimer = 10.0f; 
@@ -907,16 +990,13 @@ public:
                                     player.sanity = std::min(100.0f, player.sanity + 50.0f);
                                     player.health -= 15.0f;       
                                     player.takingDamage = true;
-                                    if (rand() % 100 < 20) {
-                                        player.toxicTimer = 0.8f;     
-                                    }
+                                    if (rand() % 100 < 20) player.toxicTimer = 0.8f;     
                                 }
                             }
                         }
                     }
                     else if (event.key.keysym.sym >= SDLK_F2 && event.key.keysym.sym <= SDLK_F10) {
                         currentLevel = event.key.keysym.sym - SDLK_F1 + 1;
-                        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.06f);
                         generateProceduralMultiLevelMaze();
                     }
                 }
@@ -1045,91 +1125,158 @@ public:
         player.targetPosZ = worldMap[standingY][standingX].floorH;
         player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
-        if (activePebble.active) {
-            activePebble.x += activePebble.vx * dtSec;
-            activePebble.y += activePebble.vy * dtSec;
-            activePebble.vz -= 15.0f * dtSec; 
-            activePebble.z += activePebble.vz * dtSec;
+        for (auto& proj : activeProjectiles) {
+            if (!proj.active) continue;
 
-            int px = int(activePebble.x);
-            int py = int(activePebble.y);
+            int curX = std::clamp(int(proj.x), 0, MAP_W - 1);
+            int curY = std::clamp(int(proj.y), 0, MAP_H - 1);
+            int nextX = std::clamp(int(proj.x + proj.vx * dtSec), 0, MAP_W - 1);
+            int nextY = std::clamp(int(proj.y + proj.vy * dtSec), 0, MAP_H - 1);
             
-            if (px >= 0 && px < MAP_W && py >= 0 && py < MAP_H && worldMap[py][px].wallType == 1) {
-                activePebble.vx = 0.0f; activePebble.vy = 0.0f; 
-            }
+            if (worldMap[curY][nextX].wallType == 1) proj.vx *= -0.5f; 
+            if (worldMap[nextY][curX].wallType == 1) proj.vy *= -0.5f; 
 
-            float distToProj = std::hypot(activePebble.x - stalker.x, activePebble.y - stalker.y);
-            if (distToProj < 0.8f && activePebble.z < 2.0f) {
-                stalker.enragedTimer = 5.0f; 
-                activePebble.active = false;
-            }
+            proj.x += proj.vx * dtSec;
+            proj.y += proj.vy * dtSec;
+            proj.vz -= 15.0f * dtSec; 
+            proj.z += proj.vz * dtSec;
 
-            float floorH = (px >= 0 && px < MAP_W && py >= 0 && py < MAP_H) ? worldMap[py][px].floorH : 0.0f;
-            if (activePebble.z <= floorH && activePebble.active) {
-                activePebble.active = false;
-                itemsInWorld.push_back({activePebble.x, activePebble.y, ITEM_PEBBLE}); 
-                
-                if (stalker.enragedTimer <= 0.0f) {
-                    stalker.investigateX = activePebble.x;
-                    stalker.investigateY = activePebble.y;
-                    stalker.investigateTimer = 5.0f; 
+            if (stalker.mode > 0) {
+                float distToProj = std::hypot(proj.x - stalker.x, proj.y - stalker.y);
+                if (distToProj < 0.8f && proj.z < 2.0f) {
+                    if (stalker.mode == 1) stalker.mode = 2; // Enrage Watcher to Hunter
+                    stalker.enragedTimer = 5.0f; 
+                    proj.active = false;
                 }
             }
-        }
 
-        float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
-
-        bool playerMakingNoise = (player.forward != 0 || player.strafe != 0) && !player.isCrouching;
-        float noiseRadius = player.isSprinting ? 14.0f : (playerMakingNoise ? 6.0f : 1.5f);
-        bool noticedPlayer = (distToMonster < noiseRadius) && (corruptionLevel > 0.5f);
-
-        if (stalker.enragedTimer > 0.0f) {
-            stalker.enragedTimer -= dtSec;
-            stalker.speed = 3.5f; 
-            stalker.investigateTimer = 0.0f; 
-        } else {
-            stalker.speed = 1.8f; 
-        }
-
-        if (noticedPlayer || stalker.enragedTimer > 0.0f) {
-            stalker.isChasing = true;
-            stalker.investigateTimer = 0.0f;
-
-            stalker.animTimer += dtSec;
-            if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
-
-            float dx = (player.posX - stalker.x) / distToMonster;
-            float dy = (player.posY - stalker.y) / distToMonster;
-            moveStalkerToward(dx, dy, dtSec);
-
-            player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
-            if (distToMonster < 0.75f) {
-                deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
-                currentState = STATE_JUMPSCARE;
-                jumpscareTimer = 2.5f; 
-                setCaptureMouse(false);
-                SDL_LockAudioDevice(audioDevice);
-                audioState.inGame = false; audioState.isJumpscare = true;
-                SDL_UnlockAudioDevice(audioDevice);
-                return;
-            }
-        } 
-        else if (stalker.investigateTimer > 0.0f) {
-            stalker.isChasing = false; 
-            stalker.investigateTimer -= dtSec;
+            int px = std::clamp(int(proj.x), 0, MAP_W - 1);
+            int py = std::clamp(int(proj.y), 0, MAP_H - 1);
+            float floorH = worldMap[py][px].floorH;
             
-            float distToTarget = std::hypot(stalker.investigateX - stalker.x, stalker.investigateY - stalker.y);
-            if (distToTarget > 0.5f) {
-                stalker.animTimer += dtSec;
-                if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+            if (proj.z <= floorH && proj.active) {
+                proj.active = false;
+                
+                SDL_LockAudioDevice(audioDevice);
+                audioState.itemSoundType = (proj.type == ITEM_PEBBLE) ? 1 : ((proj.type == ITEM_MEDS) ? 2 : 3);
+                audioState.itemSoundPhase = 0.0f;
+                audioState.itemSoundTimer = 0.5f;
+                SDL_UnlockAudioDevice(audioDevice);
 
-                float dx = (stalker.investigateX - stalker.x) / distToTarget;
-                float dy = (stalker.investigateY - stalker.y) / distToTarget;
-                moveStalkerToward(dx, dy, dtSec);
+                if (proj.type == ITEM_PEBBLE) {
+                    itemsInWorld.push_back({proj.x, proj.y, ITEM_PEBBLE}); 
+                    if (stalker.mode > 0 && stalker.enragedTimer <= 0.0f) {
+                        stalker.investigateX = proj.x;
+                        stalker.investigateY = proj.y;
+                        stalker.investigateTimer = 5.0f; 
+                    }
+                } else if (proj.type == ITEM_BREAD) {
+                    itemsInWorld.push_back({proj.x, proj.y, ITEM_BREAD}); 
+                } 
             }
-        } 
-        else {
-            stalker.isChasing = false;
+        }
+        
+        activeProjectiles.erase(std::remove_if(activeProjectiles.begin(), activeProjectiles.end(), [](const Projectile& p){ return !p.active; }), activeProjectiles.end());
+
+        // ==========================================
+        // DYNAMIC ESCALATION AI LOGIC
+        // ==========================================
+        if (stalker.mode > 0) {
+            float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
+
+            bool playerMakingNoise = (player.forward != 0 || player.strafe != 0) && !player.isCrouching;
+            float noiseRadius = player.isSprinting ? 14.0f : (playerMakingNoise ? 6.0f : 1.5f);
+            bool noticedPlayer = (distToMonster < noiseRadius);
+
+            if (stalker.enragedTimer > 0.0f) {
+                stalker.enragedTimer -= dtSec;
+                stalker.speed = 3.5f; 
+                stalker.investigateTimer = 0.0f; 
+                stalker.mode = 2; // Force hunt if angry
+            } else {
+                stalker.speed = (stalker.mode == 1) ? 1.4f : 1.8f; 
+            }
+
+            if (stalker.mode == 2) {
+                // HUNTER MODE
+                if (noticedPlayer || stalker.enragedTimer > 0.0f || distToMonster < 8.5f) {
+                    stalker.isChasing = true;
+                    stalker.investigateTimer = 0.0f;
+
+                    stalker.animTimer += dtSec;
+                    if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+
+                    float dx = (player.posX - stalker.x) / distToMonster;
+                    float dy = (player.posY - stalker.y) / distToMonster;
+                    moveStalkerToward(dx, dy, dtSec);
+
+                    player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
+                    if (distToMonster < 0.75f) {
+                        deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
+                        currentState = STATE_JUMPSCARE;
+                        jumpscareTimer = 2.5f; 
+                        setCaptureMouse(false);
+                        SDL_LockAudioDevice(audioDevice);
+                        audioState.inGame = false; audioState.isJumpscare = true;
+                        SDL_UnlockAudioDevice(audioDevice);
+                        return;
+                    }
+                } 
+                else if (stalker.investigateTimer > 0.0f) {
+                    stalker.isChasing = false; 
+                    stalker.investigateTimer -= dtSec;
+                    
+                    float distToTarget = std::hypot(stalker.investigateX - stalker.x, stalker.investigateY - stalker.y);
+                    if (distToTarget > 0.5f) {
+                        stalker.animTimer += dtSec;
+                        if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+
+                        float dx = (stalker.investigateX - stalker.x) / distToTarget;
+                        float dy = (stalker.investigateY - stalker.y) / distToTarget;
+                        moveStalkerToward(dx, dy, dtSec);
+                    }
+                } 
+                else {
+                    stalker.isChasing = false;
+                }
+            } 
+            else if (stalker.mode == 1) {
+                // WATCHER MODE
+                stalker.isChasing = false; 
+                float targetDist = 14.0f;
+
+                if (stalker.investigateTimer > 0.0f) {
+                    stalker.investigateTimer -= dtSec;
+                    float distToTarget = std::hypot(stalker.investigateX - stalker.x, stalker.investigateY - stalker.y);
+                    if (distToTarget > 0.5f) {
+                        stalker.animTimer += dtSec;
+                        if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+                        float dx = (stalker.investigateX - stalker.x) / distToTarget;
+                        float dy = (stalker.investigateY - stalker.y) / distToTarget;
+                        moveStalkerToward(dx, dy, dtSec);
+                    }
+                } 
+                else if (distToMonster < targetDist - 2.0f) {
+                    // Backs away into shadows
+                    float dx = (stalker.x - player.posX) / distToMonster;
+                    float dy = (stalker.y - player.posY) / distToMonster;
+                    moveStalkerToward(dx, dy, dtSec);
+                    stalker.animTimer += dtSec;
+                    if (stalker.animTimer > 0.35f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+                } 
+                else if (distToMonster > targetDist + 2.0f && noticedPlayer) {
+                    // Creeps closer
+                    float dx = (player.posX - stalker.x) / distToMonster;
+                    float dy = (player.posY - stalker.y) / distToMonster;
+                    moveStalkerToward(dx, dy, dtSec);
+                    stalker.animTimer += dtSec;
+                    if (stalker.animTimer > 0.35f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+                }
+
+                if (distToMonster < 1.0f) {
+                    stalker.mode = 0; // Vanishes if touched
+                }
+            }
         }
 
         player.sanity = std::max(0.0f, player.sanity);
@@ -1158,8 +1305,8 @@ public:
         SDL_LockAudioDevice(audioDevice);
         float activeCorr = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
         audioState.sanity = player.sanity;
-        audioState.monsterDist = distToMonster;
-        audioState.isChasing = stalker.isChasing;
+        audioState.monsterDist = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
+        audioState.isChasing = stalker.isChasing && (stalker.mode > 0);
         audioState.corruption = activeCorr;
         audioState.isMoving = (player.forward != 0 || player.strafe != 0);
         audioState.isSprinting = player.isSprinting;
@@ -1253,9 +1400,9 @@ public:
             }
         }
         
-        if (activePebble.active) {
-            float spriteX = activePebble.x - player.posX;
-            float spriteY = activePebble.y - player.posY;
+        for (const auto& proj : activeProjectiles) {
+            float spriteX = proj.x - player.posX;
+            float spriteY = proj.y - player.posY;
             float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
             float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
             float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
@@ -1264,9 +1411,11 @@ public:
                 int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
                 float totalPlayerZ = player.posZ + player.eyeHeight;
                 int horizon = int(ROWS / 2 + player.pitch);
-                int screenY = horizon - int(((activePebble.z - totalPlayerZ) * ROWS) / transformY);
+                int screenY = horizon - int(((proj.z - totalPlayerZ) * ROWS) / transformY);
                 if (screenX >= 0 && screenX < viewWidth && transformY <= zBuffer[screenX] && screenY >= 0 && screenY < ROWS) {
-                    drawGlyphFine(screenX, screenY, 'o', 0xFF94A3B8);
+                    char c = (proj.type == ITEM_PEBBLE) ? 'o' : (proj.type == ITEM_BREAD ? 'B' : '+');
+                    uint32_t col = (proj.type == ITEM_PEBBLE) ? 0xFF94A3B8 : (proj.type == ITEM_BREAD ? 0xFFF59E0B : 0xFF06B6D4);
+                    drawGlyphFine(screenX, screenY, c, col);
                 }
             }
         }
@@ -1522,7 +1671,7 @@ public:
 
         renderItems(zBuffer);
 
-        if (corruptionLevel > 0.5f || stalker.enragedTimer > 0.0f) {
+        if (stalker.mode > 0) {
             renderStalkerSprite(zBuffer);
         }
 
@@ -1620,7 +1769,7 @@ public:
         }
         drawGlyphFine(miniStartX + pMapX, miniStartY + pMapY, 'O', 0xFF38BDF8);
 
-        if (stalker.isChasing || stalker.investigateTimer > 0.0f) {
+        if (stalker.mode > 0 && (stalker.isChasing || stalker.investigateTimer > 0.0f || stalker.mode == 1)) {
             int mX = int(stalker.x);
             int mY = int(stalker.y);
             if (mX >= 0 && mX < MAP_W && mY >= 0 && mY < MAP_H) {
@@ -1645,9 +1794,9 @@ public:
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
 
-        std::string options[3] = { "START GAME", "DIFFICULTY: " + diffStr, "RESOLUTION: " + resStr };
+        std::string options[4] = { "START GAME", "DIFFICULTY: " + diffStr, "RESOLUTION: " + resStr, "QUIT GAME" };
 
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 4; ++i) {
             uint32_t col = (i == menuCursor) ? TIER_HIGH_BRIGHT : 0xFF64748B;
             std::string prefix = (i == menuCursor) ? "-> " : "   ";
             drawTextStandard(32, 24 + i * 4, prefix + options[i], col);
