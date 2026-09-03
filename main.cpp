@@ -1280,7 +1280,7 @@ public:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    void renderItems(const std::vector<float>& zBuffer) {
+   void renderItems(const std::vector<float>& zBuffer) {
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         
         std::vector<std::pair<float, ItemEntity>> sortedItems;
@@ -1316,7 +1316,14 @@ public:
             int rowCount = activeSprite.size();
             int colCount = activeSprite[0].size();
             
-            float aspect = (float)colCount / (float)rowCount;
+            // ==========================================
+            // TWEAK THIS NUMBER TO FIX THE STRETCHING
+            // Lower number (e.g. 0.25f) = Thinner Item
+            // Higher number (e.g. 0.60f) = Wider Item
+            // ==========================================
+            float aspectMultiplier = 0.35f; 
+            
+            float aspect = ((float)colCount / (float)rowCount) * aspectMultiplier;
             int spriteHeight = std::abs(int(ROWS / transformY / ((item.type == ITEM_PEBBLE) ? 4.0f : 2.5f))); 
             if (spriteHeight == 0) continue;
             
@@ -1362,6 +1369,7 @@ public:
             }
         }
         
+        // Render Active Flying Projectile
         if (activePebble.active) {
             float spriteX = activePebble.x - player.posX;
             float spriteY = activePebble.y - player.posY;
@@ -1380,7 +1388,7 @@ public:
             }
         }
     }
-
+    
     void renderStalkerSprite(const std::vector<float>& zBuffer) {
         float spriteX = stalker.x - player.posX;
         float spriteY = stalker.y - player.posY;
