@@ -9,7 +9,6 @@
 #include <ctime>
 #include <stack>
 
-// Fine ASCII character dimensions for the 3D game viewport
 constexpr int CHAR_W = 6;
 constexpr int CHAR_H = 6;
 constexpr int TOTAL_COLS = 133; 
@@ -36,20 +35,30 @@ constexpr double FIXED_TIMESTEP = 1000.0 / 60.0;
 constexpr int MAP_W = 27;
 constexpr int MAP_H = 27;
 
-// Clean Palettes
-constexpr uint32_t TIER_LOW_BRIGHT  = 0xFF16A34A;
-constexpr uint32_t TIER_LOW_MID     = 0xFF15803D;
-constexpr uint32_t TIER_LOW_DARK    = 0xFF14532D;
+// Realistic Color Palettes for Themes
+constexpr uint32_t THEME0_BRIGHT = 0xFF64748B;
+constexpr uint32_t THEME0_MID    = 0xFF475569;
+constexpr uint32_t THEME0_DARK   = 0xFF1E293B;
 
-constexpr uint32_t TIER_MID_BRIGHT  = 0xFF38BDF8;
-constexpr uint32_t TIER_MID_MID     = 0xFF0284C7;
-constexpr uint32_t TIER_MID_DARK    = 0xFF0369A1;
+constexpr uint32_t THEME1_BRIGHT = 0xFF854D0E;
+constexpr uint32_t THEME1_MID    = 0xFF653B0B;
+constexpr uint32_t THEME1_DARK   = 0xFF422506;
 
+constexpr uint32_t THEME2_BRIGHT = 0xFF4D7C0F;
+constexpr uint32_t THEME2_MID    = 0xFF3F6212;
+constexpr uint32_t THEME2_DARK   = 0xFF1A2E05;
+
+constexpr uint32_t THEME3_BRIGHT = 0xFF78350F;
+constexpr uint32_t THEME3_MID    = 0xFF451A03;
+constexpr uint32_t THEME3_DARK   = 0xFF1C1917;
+
+// Restored UI / Status Colors
 constexpr uint32_t TIER_HIGH_BRIGHT = 0xFF86EFAC;
-constexpr uint32_t TIER_HIGH_MID    = 0xFF4ADE80;
 constexpr uint32_t TIER_HIGH_DARK   = 0xFF22C55E;
+constexpr uint32_t TIER_MID_BRIGHT  = 0xFF38BDF8;
+constexpr uint32_t TIER_LOW_BRIGHT  = 0xFF16A34A;
 
-// Corrupted Nightmare Palettes (Reds & Ambers)
+// Corrupted Nightmare Palettes
 constexpr uint32_t CORRUPT_BRIGHT   = 0xFFF43F5E;
 constexpr uint32_t CORRUPT_MID      = 0xFFBE123C;
 constexpr uint32_t CORRUPT_DARK     = 0xFF881337;
@@ -72,6 +81,25 @@ enum GameState {
 enum Difficulty {
     DIFF_NORMAL = 0,
     DIFF_EASY   = 1
+};
+
+enum ItemType {
+    ITEM_NONE,
+    ITEM_BREAD,
+    ITEM_MEDS,
+    ITEM_PEBBLE
+};
+
+struct ItemEntity {
+    float x;
+    float y;
+    ItemType type;
+};
+
+struct Projectile {
+    float x, y, z;
+    float vx, vy, vz;
+    bool active = false;
 };
 
 const uint8_t FONT_8X8[96][8] = {
@@ -105,13 +133,35 @@ const uint8_t FONT_8X8[96][8] = {
     {0xC6,0xC6,0xC6,0xC6,0xC6,0x6C,0x38,0x00}, {0xC6,0xC6,0xC6,0xD6,0xFE,0xEE,0xC6,0x00},
     {0xC6,0xC6,0x6C,0x38,0x6C,0xC6,0xC6,0x00}, {0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00},
     {0xFE,0xC6,0x8C,0x18,0x32,0x66,0xFE,0x00}, {0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00},
-    {0xC0,0x60,0x30,0x18,0x0C,0x06,0x02,0x00}, {0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00}
+    {0xC0,0x60,0x30,0x18,0x0C,0x06,0x02,0x00}, {0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00},
+    // NOTE: the table above only covered ASCII 32-93 (space through ']'),
+    // leaving ^ _ ` a-z { | } ~ DEL zero-initialized (i.e. invisible).
+    // That silently blanked out lowercase HUD text (e.g. "Sprint", "Crouch",
+    // "v1.0") and several characters used directly by the ASCII-art sprites
+    // (the stalker/bread/meds art uses '_', '~', '|'). Filled in below.
+    {0x10,0x38,0x6C,0xC6,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF}, // ^ _
+    {0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00}, // ` a
+    {0xE0,0x60,0x60,0x7C,0x66,0x66,0xDC,0x00}, {0x00,0x00,0x78,0xCC,0xC0,0xCC,0x78,0x00}, // b c
+    {0x1C,0x0C,0x0C,0x7C,0xCC,0xCC,0x76,0x00}, {0x00,0x00,0x78,0xCC,0xFC,0xC0,0x78,0x00}, // d e
+    {0x38,0x6C,0x60,0xF0,0x60,0x60,0xF0,0x00}, {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0xF8}, // f g
+    {0xE0,0x60,0x6C,0x76,0x66,0x66,0xE6,0x00}, {0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00}, // h i
+    {0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3C}, {0xE0,0x60,0x66,0x6C,0x78,0x6C,0xE6,0x00}, // j k
+    {0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00}, {0x00,0x00,0xEC,0xFE,0xD6,0xD6,0xD6,0x00}, // l m
+    {0x00,0x00,0xDC,0x66,0x66,0x66,0x66,0x00}, {0x00,0x00,0x78,0xCC,0xCC,0xCC,0x78,0x00}, // n o
+    {0x00,0x00,0xDC,0x66,0x66,0x7C,0x60,0xF0}, {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0x1E}, // p q
+    {0x00,0x00,0xDC,0x76,0x66,0x60,0xF0,0x00}, {0x00,0x00,0x7C,0xC0,0x78,0x0C,0xF8,0x00}, // r s
+    {0x10,0x30,0x7C,0x30,0x30,0x34,0x18,0x00}, {0x00,0x00,0xCC,0xCC,0xCC,0xCC,0x76,0x00}, // t u
+    {0x00,0x00,0xCC,0xCC,0xCC,0x78,0x30,0x00}, {0x00,0x00,0xC6,0xD6,0xD6,0xFE,0x6C,0x00}, // v w
+    {0x00,0x00,0xC6,0x6C,0x38,0x6C,0xC6,0x00}, {0x00,0x00,0xC6,0xC6,0xC6,0x7E,0x06,0xFC}, // x y
+    {0x00,0x00,0xFC,0x98,0x30,0x64,0xFC,0x00}, {0x1C,0x30,0x30,0xE0,0x30,0x30,0x1C,0x00}, // z {
+    {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00}, {0xE0,0x30,0x30,0x1C,0x30,0x30,0xE0,0x00}, // | }
+    {0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}  // ~ DEL
 };
 
 struct Point { int x, y; };
 
 struct MapCell {
-    int wallType = 0;
+    int wallType = 0; 
     float floorH = 0.0f;
     float ceilH = 2.0f;
     bool isStairs = false;
@@ -122,13 +172,99 @@ struct AudioState {
     float heartbeatPhase = 0.0f;
     float monsterPhase = 0.0f;
     float screamPhase = 0.0f;
+    float footstepPhase = 0.0f;
+    
     float sanity = 100.0f;
     float monsterDist = 20.0f;
     float corruption = 0.0f;
+    
     bool isChasing = false;
     bool isJumpscare = false;
     bool inGame = false;
+    
+    bool isMoving = false;
+    bool isSprinting = false;
+    bool isCrouching = false;
+    
+    uint32_t rngSeed = 1337; // Dedicated, thread-safe seed for audio
 };
+
+void audioCallback(void* userdata, Uint8* stream, int len) {
+    AudioState* audio = static_cast<AudioState*>(userdata);
+    int16_t* buffer = reinterpret_cast<int16_t*>(stream);
+    int samples = len / sizeof(int16_t);
+
+    // Private, thread-safe noise generator (Fast LCG algorithm)
+    auto getAudioNoise = [](uint32_t& seed) -> float {
+        seed = seed * 1664525 + 1013904223;
+        return (static_cast<float>(seed >> 16) / 32768.0f) * 2.0f - 1.0f;
+    };
+
+    for (int i = 0; i < samples; ++i) {
+        if (!audio->inGame && !audio->isJumpscare) {
+            buffer[i] = 0;
+            continue;
+        }
+
+        if (audio->isJumpscare) {
+            audio->screamPhase += (350.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
+            
+            float screech = std::sin(audio->screamPhase) * 0.5f;
+            float rawNoise = getAudioNoise(audio->rngSeed) * 0.7f;
+            float demonicRumble = std::sin(audio->screamPhase * 0.1f) * 0.4f;
+
+            buffer[i] = static_cast<int16_t>(std::clamp(screech + rawNoise + demonicRumble, -1.0f, 1.0f) * 32767.0f);
+            continue;
+        }
+
+        float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
+        audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
+        float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
+
+        // Smoothed Footstep Engine
+        float footstep = 0.0f;
+        if (audio->isMoving && !audio->isCrouching) {
+            float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
+            audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
+            
+            // Replaces the harsh ON/OFF click with a curved envelope to sound like crunching gravel
+            float stepEnv = std::max(0.0f, std::sin(audio->footstepPhase));
+            stepEnv = std::pow(stepEnv, 6.0f); 
+            footstep = getAudioNoise(audio->rngSeed) * stepEnv * 0.15f; 
+        } else {
+            audio->footstepPhase = 0.0f; 
+        }
+
+        float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
+        audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+        if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
+
+        float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
+        float beatEnv = 0.0f;
+        float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
+        if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
+        else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
+        float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
+
+        float monsterAudio = 0.0f;
+        if (audio->monsterDist < 10.0f) {
+            float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
+            float proxVol = 1.0f - (audio->monsterDist / 10.0f);
+            float breathFreq = audio->isChasing ? 2.5f : 0.8f;
+            audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
+            
+            // Smoothly thread-safe monster breathing
+            float breathEnv = std::sin(audio->monsterPhase) * 0.5f + 0.5f;
+            monsterAudio = getAudioNoise(audio->rngSeed) * breathEnv * proxVol * 0.4f * mixMonster;
+        }
+
+        buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
+    }
+}
 
 void audioCallback(void* userdata, Uint8* stream, int len) {
     AudioState* audio = static_cast<AudioState*>(userdata);
@@ -144,46 +280,56 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         if (audio->isJumpscare) {
             audio->screamPhase += (350.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
             if (audio->screamPhase > 2.0f * 3.14159265f) audio->screamPhase -= 2.0f * 3.14159265f;
-            
             float screech = std::sin(audio->screamPhase) * 0.5f;
             float rawNoise = ((rand() % 2000) / 1000.0f - 1.0f) * 0.7f;
             float demonicRumble = std::sin(audio->screamPhase * 0.1f) * 0.4f;
-
             buffer[i] = static_cast<int16_t>(std::clamp(screech + rawNoise + demonicRumble, -1.0f, 1.0f) * 32767.0f);
             continue;
         }
 
         float mixAmbient = std::clamp((audio->corruption - 0.2f) * 4.0f, 0.0f, 1.0f);
-        float mixHeart   = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
-        float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
-
         audio->ambientPhase += (42.0f * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
         if (audio->ambientPhase > 2.0f * 3.14159265f) audio->ambientPhase -= 2.0f * 3.14159265f;
-        float ambient = std::sin(audio->ambientPhase) * 0.08f * mixAmbient;
+        float ambient = std::sin(audio->ambientPhase) * 0.0896f * mixAmbient; 
+
+        float footstep = 0.0f;
+        if (audio->isMoving && !audio->isCrouching) {
+            float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
+            audio->footstepPhase += (stepFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
+            if (audio->footstepPhase > 2.0f * 3.14159265f) audio->footstepPhase -= 2.0f * 3.14159265f;
+            
+            float stepEnv = std::sin(audio->footstepPhase);
+            if (stepEnv > 0.85f) { 
+                float noise = ((rand() % 2000) / 1000.0f - 1.0f);
+                footstep = noise * 0.15f; 
+            }
+        } else {
+            audio->footstepPhase = 0.0f; 
+        }
 
         float heartBPM = 1.0f + (100.0f - audio->sanity) / 100.0f * 2.0f;
         audio->heartbeatPhase += (heartBPM * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
         if (audio->heartbeatPhase > 2.0f * 3.14159265f) audio->heartbeatPhase -= 2.0f * 3.14159265f;
 
+        float mixHeart = std::clamp((audio->corruption - 0.5f) * 3.0f, 0.0f, 1.0f);
         float beatEnv = 0.0f;
         float cyclePos = audio->heartbeatPhase / (2.0f * 3.14159265f);
         if (cyclePos < 0.15f) beatEnv = std::sin(cyclePos / 0.15f * 3.14159265f);
         else if (cyclePos > 0.22f && cyclePos < 0.35f) beatEnv = std::sin((cyclePos - 0.22f) / 0.13f * 3.14159265f) * 0.7f;
-
         float heartbeat = std::sin(audio->heartbeatPhase * 40.0f) * beatEnv * (0.35f + (100.0f - audio->sanity) / 100.0f * 0.50f) * mixHeart;
 
         float monsterAudio = 0.0f;
         if (audio->monsterDist < 10.0f) {
+            float mixMonster = std::clamp((audio->corruption - 0.6f) * 3.0f, 0.0f, 1.0f);
             float proxVol = 1.0f - (audio->monsterDist / 10.0f);
             float breathFreq = audio->isChasing ? 2.5f : 0.8f;
             audio->monsterPhase += (breathFreq * 2.0f * 3.14159265f) / AUDIO_SAMPLE_RATE;
             if (audio->monsterPhase > 2.0f * 3.14159265f) audio->monsterPhase -= 2.0f * 3.14159265f;
-
             float noise = ((rand() % 2000) / 1000.0f - 1.0f);
             monsterAudio = noise * (std::sin(audio->monsterPhase) * 0.5f + 0.5f) * proxVol * 0.4f * mixMonster;
         }
 
-        buffer[i] = static_cast<int16_t>(std::clamp(ambient + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
+        buffer[i] = static_cast<int16_t>(std::clamp(ambient + footstep + heartbeat + monsterAudio, -1.0f, 1.0f) * 32767.0f);
     }
 }
 
@@ -206,6 +352,9 @@ private:
     Point startPos;
     Point endPos;
 
+    std::vector<ItemEntity> itemsInWorld;
+    Projectile activePebble; 
+
     int currentLevel = 1;
     int totalSteps = 0;
     float levelTime = 0.0f;
@@ -219,23 +368,99 @@ private:
         float posZ = 0.0f;
         float targetPosZ = 0.0f;
         float eyeHeight = 0.5f;
+        float targetEyeHeight = 0.5f;
         float pitch = 0.0f;
 
         float dirX = 1.0f;
         float dirY = 0.0f;
         float planeX = 0.0f;
         float planeY = 0.66f;
+        float baseMoveSpeed = 3.2f;
         float moveSpeed = 3.2f;
         float mouseSensitivity = 0.0022f;
 
         int forward = 0; 
         int strafe = 0;  
+        bool isSprinting = false;
+        bool isCrouching = false;
         float stepAccumulator = 0.0f;
         
         float sanity = 100.0f;
         float health = 100.0f;
         bool takingDamage = false;
+
+        ItemType inventory[3] = {ITEM_NONE, ITEM_NONE, ITEM_NONE};
+        float toxicTimer = 0.0f;
     } player;
+
+    const std::vector<std::string> spriteBread = {
+        "          .-\"\"\"\"\"\"\"\"\"\"\"\"-.          ",
+        "        .-'                '-.        ",
+        "      .'                      '.      ",
+        "     /    .--.                 \\      ",
+        "    ;    /    \\    .           ;      ",
+        "    |   |  ()  |       .       |      ",
+        "    |    \\____/   .           |       ",
+        "    ;       .       .   *     ;       ",
+        "     \\   .      *             /       ",
+        "      '.                    .'        ",
+        "        '-.______________.-'          ",
+        "           .  *    .  *  .            "
+    };
+
+    const std::vector<std::string> spriteMeds = {
+        "                         .-~~~~~-.                      ",
+        "                       .'  .---.  '.                    ",
+        "                      /   /     \\   \\                   ",
+        "                     |   |  _ _  |   |                  ",
+        "                     |   | |   | |   |                  ",
+        "                     |   | |___| |   |                  ",
+        "                     |    \\_____/    |                  ",
+        "                     |      |||      |                  ",
+        "                 ____|______|||______|____              ",
+        "              .-'                         '-.           ",
+        "            .'       .------------- .         '.        ",
+        "           /        /               \\           \\       ",
+        "          /        /                 \\           \\      ",
+        "         ;        |                  |           ;      ",
+        "         |        |                  |           |      ",
+        "         |        |   .----------.   |           |      ",
+        "         |        |   |          |   |           |      ",
+        "         |        |   |  1897    |   |           |      ",
+        "         |        |   '----------'   |           |      ",
+        "         |        |                  |           |      ",
+        "         |        |                  |           |      ",
+        "         ;        |                  |           ;      ",
+        "          \\       |   . . . . . .    |          /       ",
+        "           \\      '-----._____.-----'         /         ",
+        "            '.            .  .              .'          ",
+        "              '-._      .      .        _.-'            ",
+        "                  '----.__________.-----'               ",
+        "                    _/    /  \\    \\_                    ",
+        "                  _/_____/____\\_____\\_                  ",
+        "                 /   .     ||     .   \\                 ",
+        "                /  .    *  ||  .     . \\                ",
+        "               |      .    ||    *      |               ",
+        "               |  *        ||       .   |               ",
+        "                \\__________||__________/                ",
+        "                 \\         ||         /                 ",
+        "                  '--------''--------'                  "
+    };
+
+    const std::vector<std::string> spritePebble = {
+        "    _----------_,                 ",
+        "    ,\"__         _-:,             ",
+        "   /    \"\"--_--\"\"...:\\            ",
+        "  /         |.........\\           ",
+        " /          |..........\\          ",
+        "/,         _'_........./:         ",
+        "! -,    _-\"   \"-_... ,;;:         ",
+        "\\   -_-\"         \"-_/;;;;         ",
+        " \\   \\             /;;;;'         ",
+        "  \\   \\           /;;;;           ",
+        "   '.  \\         /;;;'            ",
+        "     \"-_\\_______/;;'              "
+    };
 
     struct Monster {
         float x = 12.5f;
@@ -244,6 +469,11 @@ private:
         bool isChasing = false;
         float animTimer = 0.0f;
         int currentFrame = 0;
+        float enragedTimer = 0.0f; 
+        
+        float investigateX = 0.0f;
+        float investigateY = 0.0f;
+        float investigateTimer = 0.0f;
 
         const std::vector<std::string> frame0 = {
             "                                                                   ",
@@ -322,6 +552,14 @@ private:
         };
     } stalker;
 
+    std::string getCurrentThemeName() {
+        int theme = (currentLevel - 1) % 4;
+        if (theme == 0) return "STANDARD MAZE";
+        if (theme == 1) return "MANSION";
+        if (theme == 2) return "HEDGE MAZE";
+        return "COURTYARD";
+    }
+
     void updateWindowScale() {
         if (window) {
             int targetW = RESOLUTION_PRESETS[currentResIndex].width;
@@ -335,33 +573,39 @@ private:
         SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
     }
 
-    uint32_t getElevationColor(float elevation, float dist, int side) {
+    // Moves the stalker toward (dx,dy)*speed, resolving X and Y separately
+    // (like the player's own movement) so it can slide along a wall instead
+    // of freezing whenever the single diagonal target cell happens to be
+    // blocked. Indices are clamped so this is always a safe array access
+    // regardless of how far stalker.x/y have drifted.
+    void moveStalkerToward(float dx, float dy, float dtSec) {
+        float moveX = dx * stalker.speed * dtSec;
+        float moveY = dy * stalker.speed * dtSec;
+
+        int curTileX = std::clamp(int(stalker.x), 0, MAP_W - 1);
+        int curTileY = std::clamp(int(stalker.y), 0, MAP_H - 1);
+        int nextTileX = std::clamp(int(stalker.x + moveX), 0, MAP_W - 1);
+        int nextTileY = std::clamp(int(stalker.y + moveY), 0, MAP_H - 1);
+
+        if (worldMap[curTileY][nextTileX].wallType == 0) stalker.x += moveX;
+        if (worldMap[nextTileY][curTileX].wallType == 0) stalker.y += moveY;
+    }
+
+    uint32_t getElevationColor(float /*elevation*/, float dist, int side) {
         uint32_t cBright, cMid, cDark;
+        float activeCorruption = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
 
-        if (corruptionLevel >= 0.85f) {
-            cBright = CORRUPT_BRIGHT;
-            cMid    = CORRUPT_MID;
-            cDark   = CORRUPT_DARK;
+        if (activeCorruption >= 0.85f) {
+            cBright = CORRUPT_BRIGHT; cMid = CORRUPT_MID; cDark = CORRUPT_DARK;
         } else {
-            if (elevation >= 0.85f) {
-                cBright = TIER_HIGH_BRIGHT;
-                cMid    = TIER_HIGH_MID;
-                cDark   = TIER_HIGH_DARK;
-            } else if (elevation >= 0.35f) {
-                cBright = TIER_MID_BRIGHT;
-                cMid    = TIER_MID_MID;
-                cDark   = TIER_MID_DARK;
-            } else {
-                cBright = TIER_LOW_BRIGHT;
-                cMid    = TIER_LOW_MID;
-                cDark   = TIER_LOW_DARK;
-            }
+            int theme = (currentLevel - 1) % 4;
+            if (theme == 0)      { cBright = THEME0_BRIGHT; cMid = THEME0_MID; cDark = THEME0_DARK; }
+            else if (theme == 1) { cBright = THEME1_BRIGHT; cMid = THEME1_MID; cDark = THEME1_DARK; }
+            else if (theme == 2) { cBright = THEME2_BRIGHT; cMid = THEME2_MID; cDark = THEME2_DARK; }
+            else                 { cBright = THEME3_BRIGHT; cMid = THEME3_MID; cDark = THEME3_DARK; }
         }
 
-        if (corruptionLevel >= 0.4f && (rand() % 100) < int(corruptionLevel * 5)) {
-            return CORRUPT_BRIGHT;
-        }
-
+        if (activeCorruption >= 0.4f && (rand() % 100) < int(activeCorruption * 5)) return CORRUPT_BRIGHT;
         if (dist < 3.0f)       return (side == 0) ? cBright : cMid;
         else if (dist < 6.5f)  return (side == 0) ? cMid : cDark;
         else                   return cDark;
@@ -369,6 +613,8 @@ private:
 
     void generateProceduralMultiLevelMaze() {
         srand(static_cast<unsigned int>(time(nullptr)) + currentLevel * 1337);
+        itemsInWorld.clear();
+        activePebble.active = false;
 
         for (int r = 0; r < MAP_H; ++r) {
             for (int c = 0; c < MAP_W; ++c) {
@@ -428,11 +674,9 @@ private:
                 if (worldMap[y][x].wallType == 0 && worldMap[y][x].floorH == 1.0f) {
                     const int nx[4] = { 1, -1, 0, 0 };
                     const int ny[4] = { 0, 0, 1, -1 };
-
                     for (int i = 0; i < 4; ++i) {
                         int adjX = x + nx[i];
                         int adjY = y + ny[i];
-
                         if (worldMap[adjY][adjX].wallType == 0 && worldMap[adjY][adjX].floorH == 0.0f) {
                             worldMap[y][x].floorH = 0.5f;
                             worldMap[y][x].isStairs = true;
@@ -441,6 +685,54 @@ private:
                     }
                 }
             }
+        }
+
+        std::vector<Point> potentialVents;
+        std::vector<Point> emptyFloorSpaces;
+        for (int y = 1; y < MAP_H - 1; ++y) {
+            for (int x = 1; x < MAP_W - 1; ++x) {
+                if (worldMap[y][x].wallType == 1) {
+                    bool horiz = (worldMap[y][x-1].wallType == 0 && worldMap[y][x+1].wallType == 0 
+                                  && worldMap[y][x-1].floorH < 0.5f && worldMap[y][x+1].floorH < 0.5f);
+                    bool vert  = (worldMap[y-1][x].wallType == 0 && worldMap[y+1][x].wallType == 0 
+                                  && worldMap[y-1][x].floorH < 0.5f && worldMap[y+1][x].floorH < 0.5f);
+                    
+                    if (horiz || vert) potentialVents.push_back({x, y});
+                }
+                if (worldMap[y][x].wallType == 0) emptyFloorSpaces.push_back({x, y});
+            }
+        }
+
+        int numVents = 1 + (rand() % 2); 
+        while (numVents > 0 && !potentialVents.empty()) {
+            int idx = rand() % potentialVents.size();
+            Point v = potentialVents[idx];
+            worldMap[v.y][v.x].wallType = 3;
+            worldMap[v.y][v.x].floorH = 0.0f; 
+            worldMap[v.y][v.x].ceilH = 2.0f;
+            potentialVents[idx] = potentialVents.back();
+            potentialVents.pop_back();
+            numVents--;
+        }
+
+        int numBread = 2 + (rand() % 3);
+        int numMeds = 1 + (rand() % 2);
+        int numPebbles = 3 + (rand() % 3);
+
+        for (int i = 0; i < numBread && !emptyFloorSpaces.empty(); ++i) {
+            int idx = rand() % emptyFloorSpaces.size(); Point p = emptyFloorSpaces[idx];
+            itemsInWorld.push_back({p.x + 0.5f, p.y + 0.5f, ITEM_BREAD});
+            emptyFloorSpaces[idx] = emptyFloorSpaces.back(); emptyFloorSpaces.pop_back();
+        }
+        for (int i = 0; i < numMeds && !emptyFloorSpaces.empty(); ++i) {
+            int idx = rand() % emptyFloorSpaces.size(); Point p = emptyFloorSpaces[idx];
+            itemsInWorld.push_back({p.x + 0.5f, p.y + 0.5f, ITEM_MEDS});
+            emptyFloorSpaces[idx] = emptyFloorSpaces.back(); emptyFloorSpaces.pop_back();
+        }
+        for (int i = 0; i < numPebbles && !emptyFloorSpaces.empty(); ++i) {
+            int idx = rand() % emptyFloorSpaces.size(); Point p = emptyFloorSpaces[idx];
+            itemsInWorld.push_back({p.x + 0.5f, p.y + 0.5f, ITEM_PEBBLE});
+            emptyFloorSpaces[idx] = emptyFloorSpaces.back(); emptyFloorSpaces.pop_back();
         }
 
         endPos = { MAP_W - 2, MAP_H - 2 };
@@ -456,10 +748,13 @@ private:
         player.planeX = 0.0f;
         player.planeY = 0.66f;
         player.stepAccumulator = 0.0f;
+        player.toxicTimer = 0.0f;
 
         stalker.x = MAP_W / 2 + 0.5f;
         stalker.y = MAP_H / 2 + 0.5f;
         stalker.isChasing = false;
+        stalker.enragedTimer = 0.0f;
+        stalker.investigateTimer = 0.0f;
     }
 
     void startNewGame() {
@@ -469,6 +764,9 @@ private:
         corruptionLevel = 0.0f; 
         player.sanity = 100.0f;
         player.health = 100.0f;
+        
+        for (int i = 0; i < 3; ++i) player.inventory[i] = ITEM_NONE;
+
         generateProceduralMultiLevelMaze();
         currentState = STATE_PLAYING;
         setCaptureMouse(true);
@@ -486,9 +784,7 @@ private:
         currentLevel++;
         player.sanity = std::min(100.0f, player.sanity + 30.0f);
         player.health = std::min(100.0f, player.health + 30.0f);
-        
-        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.11f);
-        
+        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.06f);
         generateProceduralMultiLevelMaze();
         currentState = STATE_PLAYING;
         setCaptureMouse(true);
@@ -500,10 +796,9 @@ private:
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    // Standard character drawing function using 8x8 font metrics for UI & Menus
     void drawGlyphStandard(int col, int row, char c, uint32_t fgColor) {
-        if (c < 32 || c > 127) return;
-        const uint8_t* glyph = FONT_8X8[c - 32];
+        unsigned char uc = static_cast<unsigned char>(c); if (uc < 32 || uc > 127) return;
+        const uint8_t* glyph = FONT_8X8[uc - 32];
         int startX = col * 8;
         int startY = row * 8;
 
@@ -528,10 +823,9 @@ private:
         }
     }
 
-    // Fine character drawing function using 6x6 font metrics specifically for the 3D game viewport
     void drawGlyphFine(int col, int row, char c, uint32_t fgColor) {
-        if (c < 32 || c > 127) return;
-        const uint8_t* glyph = FONT_8X8[c - 32];
+        unsigned char uc = static_cast<unsigned char>(c); if (uc < 32 || uc > 127) return;
+        const uint8_t* glyph = FONT_8X8[uc - 32];
         int startX = col * CHAR_W;
         int startY = row * CHAR_H;
 
@@ -578,7 +872,10 @@ public:
     bool init() {
         srand(static_cast<unsigned int>(time(nullptr)));
 
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) return false;
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) {
+            std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
+            return false;
+        }
 
         window = SDL_CreateWindow(
             "Walk ASCII 3D Horror",
@@ -587,14 +884,30 @@ public:
             RESOLUTION_PRESETS[currentResIndex].height,
             SDL_WINDOW_SHOWN
         );
+        if (!window) {
+            std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
+            return false;
+        }
 
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        if (!renderer) {
+            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+        }
+        if (!renderer) {
+            std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
+            return false;
+        }
+
         screenTexture = SDL_CreateTexture(
             renderer,
             SDL_PIXELFORMAT_ARGB8888,
             SDL_TEXTUREACCESS_STREAMING,
             NATIVE_WIDTH, NATIVE_HEIGHT
         );
+        if (!screenTexture) {
+            std::cerr << "SDL_CreateTexture failed: " << SDL_GetError() << "\n";
+            return false;
+        }
 
         pixelBuffer.resize(NATIVE_WIDTH * NATIVE_HEIGHT, 0xFF000000);
 
@@ -636,12 +949,9 @@ public:
 
             if (event.type == SDL_KEYDOWN) {
                 if (currentState == STATE_TITLE) {
-                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) {
-                        menuCursor = (menuCursor - 1 + 3) % 3;
-                    }
-                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) {
-                        menuCursor = (menuCursor + 1) % 3;
-                    }
+                    if (event.key.keysym.sym == SDLK_UP || event.key.keysym.sym == SDLK_w) menuCursor = (menuCursor - 1 + 3) % 3;
+                    if (event.key.keysym.sym == SDLK_DOWN || event.key.keysym.sym == SDLK_s) menuCursor = (menuCursor + 1) % 3;
+                    
                     if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
                         if (menuCursor == 0) startNewGame();
                         else if (menuCursor == 1) currentDifficulty = (currentDifficulty == DIFF_NORMAL) ? DIFF_EASY : DIFF_NORMAL;
@@ -669,13 +979,57 @@ public:
                         audioState.inGame = false;
                         SDL_UnlockAudioDevice(audioDevice);
                     }
-                    else if (event.key.keysym.sym == SDLK_F1) {
-                        nextLevel();
+                    else if (event.key.keysym.sym == SDLK_e) {
+                        for (auto it = itemsInWorld.begin(); it != itemsInWorld.end(); ++it) {
+                            if (std::hypot(player.posX - it->x, player.posY - it->y) < 1.5f) {
+                                for (int i = 0; i < 3; ++i) {
+                                    if (player.inventory[i] == ITEM_NONE) {
+                                        player.inventory[i] = it->type;
+                                        itemsInWorld.erase(it);
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
                     }
-                    else if (event.key.keysym.sym >= SDLK_1 && event.key.keysym.sym <= SDLK_9) {
-                        int num = event.key.keysym.sym - SDLK_1 + 1;
-                        currentLevel = num;
-                        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.11f);
+                    else if (event.key.keysym.sym >= SDLK_1 && event.key.keysym.sym <= SDLK_3) {
+                        int slot = event.key.keysym.sym - SDLK_1;
+                        bool dropping = (SDL_GetModState() & KMOD_SHIFT);
+                        
+                        if (player.inventory[slot] != ITEM_NONE) {
+                            if (dropping) {
+                                itemsInWorld.push_back({player.posX, player.posY, player.inventory[slot]});
+                                player.inventory[slot] = ITEM_NONE;
+                            } else {
+                                ItemType type = player.inventory[slot];
+                                player.inventory[slot] = ITEM_NONE;
+                                
+                                if (type == ITEM_PEBBLE) {
+                                    activePebble.x = player.posX;
+                                    activePebble.y = player.posY;
+                                    activePebble.z = player.posZ + player.eyeHeight;
+                                    activePebble.vx = player.dirX * 6.0f;
+                                    activePebble.vy = player.dirY * 6.0f;
+                                    activePebble.vz = 2.5f + (player.pitch / 22.0f) * 2.0f;
+                                    activePebble.active = true;
+                                } else if (type == ITEM_BREAD) {
+                                    player.health = std::min(100.0f, player.health + 40.0f);
+                                    stalker.enragedTimer = 10.0f; 
+                                } else if (type == ITEM_MEDS) {
+                                    player.sanity = std::min(100.0f, player.sanity + 50.0f);
+                                    player.health -= 15.0f;       
+                                    player.takingDamage = true;
+                                    if (rand() % 100 < 20) {
+                                        player.toxicTimer = 0.8f;     
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (event.key.keysym.sym >= SDLK_F2 && event.key.keysym.sym <= SDLK_F10) {
+                        currentLevel = event.key.keysym.sym - SDLK_F1 + 1;
+                        corruptionLevel = std::min(1.0f, (currentLevel - 1) * 0.06f);
                         generateProceduralMultiLevelMaze();
                     }
                 }
@@ -687,19 +1041,12 @@ public:
                         audioState.inGame = true;
                         SDL_UnlockAudioDevice(audioDevice);
                     }
-                    else if (event.key.keysym.sym == SDLK_q) {
-                        currentState = STATE_TITLE;
-                    }
+                    else if (event.key.keysym.sym == SDLK_q) currentState = STATE_TITLE;
                 }
-                else if (currentState == STATE_SUCCESS) {
-                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) nextLevel();
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        currentState = STATE_TITLE;
-                        setCaptureMouse(false);
+                else if (currentState == STATE_SUCCESS || currentState == STATE_GAMEOVER) {
+                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) {
+                        if (currentState == STATE_SUCCESS) nextLevel(); else startNewGame();
                     }
-                }
-                else if (currentState == STATE_GAMEOVER) {
-                    if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_SPACE) startNewGame();
                     if (event.key.keysym.sym == SDLK_ESCAPE) {
                         currentState = STATE_TITLE;
                         setCaptureMouse(false);
@@ -717,6 +1064,20 @@ public:
             if (state[SDL_SCANCODE_S]) player.forward -= 1;
             if (state[SDL_SCANCODE_A]) player.strafe -= 1; 
             if (state[SDL_SCANCODE_D]) player.strafe += 1; 
+
+            player.isSprinting = state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT];
+            player.isCrouching = state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL];
+
+            if (player.isCrouching) {
+                player.moveSpeed = player.baseMoveSpeed * 0.45f;
+                player.targetEyeHeight = 0.25f;
+            } else if (player.isSprinting) {
+                player.moveSpeed = player.baseMoveSpeed * 1.75f;
+                player.targetEyeHeight = 0.50f;
+            } else {
+                player.moveSpeed = player.baseMoveSpeed;
+                player.targetEyeHeight = 0.50f;
+            }
         }
     }
 
@@ -738,6 +1099,10 @@ public:
         levelTime += dtSec;
         player.takingDamage = false;
 
+        if (player.toxicTimer > 0.0f) player.toxicTimer -= dtSec;
+
+        player.eyeHeight += (player.targetEyeHeight - player.eyeHeight) * 0.2f;
+
         if (player.forward != 0 || player.strafe != 0) {
             float forwardStep = player.forward * player.moveSpeed * dtSec;
             float strafeStep  = player.strafe  * (player.moveSpeed * 0.85f) * dtSec;
@@ -755,18 +1120,25 @@ public:
             int currTileY = int(player.posY);
             float currFloor = worldMap[currTileY][currTileX].floorH;
 
-            int nextTileX = int(player.posX + moveX + bufX);
-            int nextTileY = int(player.posY + moveY + bufY);
+            int nextTileX = std::clamp(int(player.posX + moveX + bufX), 0, MAP_W - 1);
+            int nextTileY = std::clamp(int(player.posY + moveY + bufY), 0, MAP_H - 1);
 
-            if (worldMap[currTileY][nextTileX].wallType != 1) {
+            bool canMoveX = false;
+            int typeX = worldMap[currTileY][nextTileX].wallType;
+            if (typeX != 1 && (typeX != 3 || player.isCrouching)) {
                 float hDiff = std::abs(worldMap[currTileY][nextTileX].floorH - currFloor);
-                if (hDiff <= 1.1f) player.posX += moveX;
+                if (hDiff <= 1.1f) canMoveX = true;
             }
 
-            if (worldMap[nextTileY][currTileX].wallType != 1) {
+            bool canMoveY = false;
+            int typeY = worldMap[nextTileY][currTileX].wallType;
+            if (typeY != 1 && (typeY != 3 || player.isCrouching)) {
                 float hDiff = std::abs(worldMap[nextTileY][currTileX].floorH - currFloor);
-                if (hDiff <= 1.1f) player.posY += moveY;
+                if (hDiff <= 1.1f) canMoveY = true;
             }
+
+            if (canMoveX) player.posX += moveX;
+            if (canMoveY) player.posY += moveY;
 
             player.stepAccumulator += std::hypot(player.posX - prevX, player.posY - prevY);
             if (player.stepAccumulator >= 1.0f) {
@@ -775,52 +1147,102 @@ public:
             }
         }
 
+        if (worldMap[int(player.posY)][int(player.posX)].wallType == 3) {
+            player.isCrouching = true;
+            player.moveSpeed = player.baseMoveSpeed * 0.45f;
+            player.targetEyeHeight = 0.25f;
+        }
+
         int standingX = int(player.posX);
         int standingY = int(player.posY);
         player.targetPosZ = worldMap[standingY][standingX].floorH;
         player.posZ += (player.targetPosZ - player.posZ) * 0.25f;
 
+        if (activePebble.active) {
+            activePebble.x += activePebble.vx * dtSec;
+            activePebble.y += activePebble.vy * dtSec;
+            activePebble.vz -= 15.0f * dtSec; 
+            activePebble.z += activePebble.vz * dtSec;
+
+            int px = int(activePebble.x);
+            int py = int(activePebble.y);
+            
+            if (px >= 0 && px < MAP_W && py >= 0 && py < MAP_H && worldMap[py][px].wallType == 1) {
+                activePebble.vx = 0.0f; activePebble.vy = 0.0f; 
+            }
+
+            float distToProj = std::hypot(activePebble.x - stalker.x, activePebble.y - stalker.y);
+            if (distToProj < 0.8f && activePebble.z < 2.0f) {
+                stalker.enragedTimer = 5.0f; 
+                activePebble.active = false;
+            }
+
+            float floorH = (px >= 0 && px < MAP_W && py >= 0 && py < MAP_H) ? worldMap[py][px].floorH : 0.0f;
+            if (activePebble.z <= floorH && activePebble.active) {
+                activePebble.active = false;
+                itemsInWorld.push_back({activePebble.x, activePebble.y, ITEM_PEBBLE}); 
+                
+                if (stalker.enragedTimer <= 0.0f) {
+                    stalker.investigateX = activePebble.x;
+                    stalker.investigateY = activePebble.y;
+                    stalker.investigateTimer = 5.0f; 
+                }
+            }
+        }
+
         float distToMonster = std::hypot(player.posX - stalker.x, player.posY - stalker.y);
 
-        if (corruptionLevel > 0.5f) {
-            if (distToMonster < 8.5f) {
-                stalker.isChasing = true;
-                
-                stalker.animTimer += dtSec;
-                if (stalker.animTimer > 0.25f) {
-                    stalker.currentFrame = 1 - stalker.currentFrame;
-                    stalker.animTimer = 0.0f;
-                }
+        bool playerMakingNoise = (player.forward != 0 || player.strafe != 0) && !player.isCrouching;
+        float noiseRadius = player.isSprinting ? 14.0f : (playerMakingNoise ? 6.0f : 1.5f);
+        bool noticedPlayer = (distToMonster < noiseRadius) && (corruptionLevel > 0.5f);
 
-                float dx = (player.posX - stalker.x) / distToMonster;
-                float dy = (player.posY - stalker.y) / distToMonster;
-
-                float nx = stalker.x + dx * stalker.speed * dtSec;
-                float ny = stalker.y + dy * stalker.speed * dtSec;
-
-                if (worldMap[int(ny)][int(nx)].wallType == 0) {
-                    stalker.x = nx;
-                    stalker.y = ny;
-                }
-
-                player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
-                if (distToMonster < 0.75f) {
-                    deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
-                    currentState = STATE_JUMPSCARE;
-                    jumpscareTimer = 2.5f; 
-                    setCaptureMouse(false);
-                    
-                    SDL_LockAudioDevice(audioDevice);
-                    audioState.inGame = false;
-                    audioState.isJumpscare = true;
-                    SDL_UnlockAudioDevice(audioDevice);
-                    return;
-                }
-            } else {
-                stalker.isChasing = false;
-            }
+        if (stalker.enragedTimer > 0.0f) {
+            stalker.enragedTimer -= dtSec;
+            stalker.speed = 3.5f; 
+            stalker.investigateTimer = 0.0f; 
         } else {
-            player.sanity = 100.0f;
+            stalker.speed = 1.8f; 
+        }
+
+        if (noticedPlayer || stalker.enragedTimer > 0.0f) {
+            stalker.isChasing = true;
+            stalker.investigateTimer = 0.0f;
+
+            stalker.animTimer += dtSec;
+            if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+
+            float dx = (player.posX - stalker.x) / distToMonster;
+            float dy = (player.posY - stalker.y) / distToMonster;
+            moveStalkerToward(dx, dy, dtSec);
+
+            player.sanity -= (6.0f / std::max(1.0f, distToMonster)) * dtSec;
+            if (distToMonster < 0.75f) {
+                deathReason = "CAUGHT IN THE DARK BY THE ENTITY";
+                currentState = STATE_JUMPSCARE;
+                jumpscareTimer = 2.5f; 
+                setCaptureMouse(false);
+                SDL_LockAudioDevice(audioDevice);
+                audioState.inGame = false; audioState.isJumpscare = true;
+                SDL_UnlockAudioDevice(audioDevice);
+                return;
+            }
+        } 
+        else if (stalker.investigateTimer > 0.0f) {
+            stalker.isChasing = false; 
+            stalker.investigateTimer -= dtSec;
+            
+            float distToTarget = std::hypot(stalker.investigateX - stalker.x, stalker.investigateY - stalker.y);
+            if (distToTarget > 0.5f) {
+                stalker.animTimer += dtSec;
+                if (stalker.animTimer > 0.25f) { stalker.currentFrame = 1 - stalker.currentFrame; stalker.animTimer = 0.0f; }
+
+                float dx = (stalker.investigateX - stalker.x) / distToTarget;
+                float dy = (stalker.investigateY - stalker.y) / distToTarget;
+                moveStalkerToward(dx, dy, dtSec);
+            }
+        } 
+        else {
+            stalker.isChasing = false;
         }
 
         player.sanity = std::max(0.0f, player.sanity);
@@ -830,25 +1252,16 @@ public:
             deathReason = "LOST TO THE TERROR (SANITY DEPLETED)";
             currentState = STATE_GAMEOVER;
             setCaptureMouse(false);
-            SDL_LockAudioDevice(audioDevice);
-            audioState.inGame = false;
-            SDL_UnlockAudioDevice(audioDevice);
-            return;
-        }
-
-        if (player.health <= 0.0f) {
+        } else if (player.health <= 0.0f) {
             deathReason = "SLAIN BY THE STALKER (HEALTH DEPLETED)";
             currentState = STATE_GAMEOVER;
             setCaptureMouse(false);
-            SDL_LockAudioDevice(audioDevice);
-            audioState.inGame = false;
-            SDL_UnlockAudioDevice(audioDevice);
-            return;
-        }
-
-        if (standingX == endPos.x && standingY == endPos.y) {
+        } else if (standingX == endPos.x && standingY == endPos.y) {
             currentState = STATE_SUCCESS;
             setCaptureMouse(false);
+        }
+
+        if (currentState != STATE_PLAYING) {
             SDL_LockAudioDevice(audioDevice);
             audioState.inGame = false;
             SDL_UnlockAudioDevice(audioDevice);
@@ -856,13 +1269,119 @@ public:
         }
 
         SDL_LockAudioDevice(audioDevice);
+        float activeCorr = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
         audioState.sanity = player.sanity;
         audioState.monsterDist = distToMonster;
         audioState.isChasing = stalker.isChasing;
+        audioState.corruption = activeCorr;
+        audioState.isMoving = (player.forward != 0 || player.strafe != 0);
+        audioState.isSprinting = player.isSprinting;
+        audioState.isCrouching = player.isCrouching;
         SDL_UnlockAudioDevice(audioDevice);
     }
 
-    void renderStalkerSprite() {
+    void renderItems(const std::vector<float>& zBuffer) {
+        int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
+        
+        std::vector<std::pair<float, ItemEntity>> sortedItems;
+        for(const auto& it : itemsInWorld) {
+            float dist = std::pow(player.posX - it.x, 2) + std::pow(player.posY - it.y, 2);
+            sortedItems.push_back({dist, it});
+        }
+        std::sort(sortedItems.begin(), sortedItems.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+
+        for(const auto& pair : sortedItems) {
+            const ItemEntity& item = pair.second;
+            float spriteX = item.x - player.posX;
+            float spriteY = item.y - player.posY;
+
+            float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+            float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+            float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+            if (transformY <= 0.2f) continue;
+
+            int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
+            float floorH = worldMap[int(item.y)][int(item.x)].floorH;
+            float totalPlayerZ = player.posZ + player.eyeHeight;
+            int horizon = int(ROWS / 2 + player.pitch);
+            
+            int screenY = horizon - int(((floorH - totalPlayerZ) * ROWS) / transformY);
+            
+            const std::vector<std::string>* activeSpritePtr = &spriteBread;
+            if (item.type == ITEM_MEDS) activeSpritePtr = &spriteMeds;
+            else if (item.type == ITEM_PEBBLE) activeSpritePtr = &spritePebble;
+
+            const auto& activeSprite = *activeSpritePtr;
+            int rowCount = activeSprite.size();
+            int colCount = activeSprite[0].size();
+            
+            float aspect = (float)colCount / (float)rowCount;
+            int spriteHeight = std::abs(int(ROWS / transformY / ((item.type == ITEM_PEBBLE) ? 4.0f : 2.5f))); 
+            if (spriteHeight == 0) continue;
+            
+            int spriteWidth = int(spriteHeight * aspect);
+            int drawStartY = screenY - spriteHeight;
+            int drawEndY = screenY;
+            int drawStartX = screenX - spriteWidth / 2;
+            int drawEndX = screenX + spriteWidth / 2;
+
+            uint32_t color = (item.type == ITEM_BREAD) ? 0xFFF59E0B : ((item.type == ITEM_MEDS) ? 0xFF06B6D4 : 0xFF94A3B8);
+            int vOffset = (player.toxicTimer > 0.0f) ? (rand() % 5) - 2 : 0;
+
+            for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
+                if (stripe < 0 || stripe >= viewWidth || transformY > zBuffer[stripe]) continue;
+                int texX = int((stripe - drawStartX) * colCount / spriteWidth);
+                if (texX < 0 || texX >= colCount) continue;
+
+                for (int y = drawStartY; y < drawEndY; ++y) {
+                    if (y < 0 || y >= ROWS) continue;
+                    int texY = int((y - drawStartY) * rowCount / spriteHeight);
+                    if (texY < 0 || texY >= rowCount) continue;
+
+                    char glyph = activeSprite[texY][texX];
+                    if (glyph != ' ' && glyph != '.') {
+                        drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
+                        drawGlyphFine(stripe, y + vOffset, glyph, color);
+                    } else {
+                        bool nearGlyph = false;
+                        for (int dy = -1; dy <= 1; ++dy) {
+                            for (int dx = -1; dx <= 1; ++dx) {
+                                if (dx == 0 && dy == 0) continue;
+                                int ny = texY + dy; int nx = texX + dx;
+                                if (ny >= 0 && ny < rowCount && nx >= 0 && nx < colCount) {
+                                    char n = activeSprite[ny][nx];
+                                    if (n != ' ' && n != '.') { nearGlyph = true; break; }
+                                }
+                            }
+                            if (nearGlyph) break;
+                        }
+                        if (nearGlyph) drawRectFilled(stripe, y + vOffset, 1, 1, 0xFF000000);
+                    }
+                }
+            }
+        }
+        
+        if (activePebble.active) {
+            float spriteX = activePebble.x - player.posX;
+            float spriteY = activePebble.y - player.posY;
+            float invDet = 1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+            float transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+            float transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+            if (transformY > 0.2f) {
+                int screenX = int((viewWidth / 2) * (1.0f + transformX / transformY));
+                float totalPlayerZ = player.posZ + player.eyeHeight;
+                int horizon = int(ROWS / 2 + player.pitch);
+                int screenY = horizon - int(((activePebble.z - totalPlayerZ) * ROWS) / transformY);
+                if (screenX >= 0 && screenX < viewWidth && transformY <= zBuffer[screenX] && screenY >= 0 && screenY < ROWS) {
+                    drawGlyphFine(screenX, screenY, 'o', 0xFF94A3B8);
+                }
+            }
+        }
+    }
+
+    void renderStalkerSprite(const std::vector<float>& zBuffer) {
         float spriteX = stalker.x - player.posX;
         float spriteY = stalker.y - player.posY;
 
@@ -888,7 +1407,7 @@ public:
         int colCount = currentSprite[0].size();
 
         for (int stripe = drawStartX; stripe < drawEndX; ++stripe) {
-            if (stripe < 0 || stripe >= viewWidth) continue;
+            if (stripe < 0 || stripe >= viewWidth || transformY > zBuffer[stripe]) continue;
 
             int texX = int((stripe - drawStartX) * colCount / spriteWidth);
             if (texX < 0 || texX >= colCount) continue;
@@ -921,9 +1440,7 @@ public:
                 int screenX = centerXOffset + x;
                 int screenY = centerYOffset + y;
 
-                if ((rand() % 100) < 5) {
-                    screenX += (rand() % 5) - 2;
-                }
+                if ((rand() % 100) < 5) screenX += (rand() % 5) - 2;
 
                 if (screenX >= 0 && screenX < TOTAL_COLS && screenY >= 0 && screenY < ROWS) {
                     char glyph = currentSprite[y][x];
@@ -938,12 +1455,10 @@ public:
         std::vector<std::string> creepyPhrases = {
             "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
         };
-        
         for (int i = 0; i < 5; ++i) {
             int rx = rand() % (TOTAL_COLS - 15);
             int ry = rand() % (ROWS - 2);
-            std::string phrase = creepyPhrases[rand() % creepyPhrases.size()];
-            drawTextFine(rx, ry, phrase, RED_GOAL_BRIGHT);
+            drawTextFine(rx, ry, creepyPhrases[rand() % creepyPhrases.size()], RED_GOAL_BRIGHT);
         }
     }
 
@@ -951,6 +1466,8 @@ public:
         int viewWidth = (currentDifficulty == DIFF_EASY) ? 68 : TOTAL_COLS;
         float totalPlayerZ = player.posZ + player.eyeHeight;
         int horizon = int(ROWS / 2 + player.pitch);
+        
+        std::vector<float> zBuffer(viewWidth, 1e30f);
 
         for (int col = 0; col < viewWidth; ++col) {
             float cameraX = 2.0f * col / float(viewWidth) - 1.0f;
@@ -1000,8 +1517,11 @@ public:
             else           perpWallDist = (sideDistY - deltaDistY);
             if (perpWallDist < 0.05f) perpWallDist = 0.05f;
 
+            zBuffer[col] = perpWallDist;
+
+            float activeCorr = (player.toxicTimer > 0.0f) ? 0.9f : corruptionLevel;
             int vOffset = 0;
-            if (corruptionLevel > 0.5f && (rand() % 100) < int(corruptionLevel * 20)) {
+            if (activeCorr > 0.5f && (rand() % 100) < int(activeCorr * 20)) {
                 vOffset = (rand() % 5) - 2; 
             }
 
@@ -1028,16 +1548,9 @@ public:
                     else if (sampledFloorH > 0.8f) {
                         bool isCheck = ((fTileX + fTileY) % 2 == 0);
                         floorGlyph = isCheck ? '#' : '-';
-                        
-                        if (corruptionLevel < 0.85f) {
-                            floorColor = isCheck ? TIER_HIGH_BRIGHT : TIER_HIGH_DARK;
-                        } else {
-                            floorColor = isCheck ? CORRUPT_BRIGHT : CORRUPT_DARK;
-                        }
-
-                        if (straightDist > 6.0f && (col % 2 != 0)) {
-                            floorGlyph = ' ';
-                        }
+                        floorColor = isCheck ? TIER_HIGH_BRIGHT : TIER_HIGH_DARK;
+                        if (activeCorr >= 0.85f) floorColor = isCheck ? CORRUPT_BRIGHT : CORRUPT_DARK;
+                        if (straightDist > 6.0f && (col % 2 != 0)) floorGlyph = ' ';
                     } 
                     else {
                         if (straightDist < 8.0f && ((fTileX + fTileY) % 2 == 0) && (col % 2 == 0)) {
@@ -1045,7 +1558,7 @@ public:
                         }
                     }
 
-                    if (corruptionLevel > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
+                    if (activeCorr > 0.3f && floorGlyph != ' ' && (rand() % 100) < int(activeCorr * 10)) {
                         floorGlyph = "?!@#$%^&*"[rand() % 9];
                     }
 
@@ -1055,32 +1568,46 @@ public:
                 }
             }
 
-            float wallFloorH = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].floorH : 0.0f;
-            float wallCeilH  = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].ceilH : 2.0f;
-
-            int drawStart = horizon - int(((wallCeilH - totalPlayerZ) * ROWS) / perpWallDist);
-            int drawEnd   = horizon - int(((wallFloorH - totalPlayerZ) * ROWS) / perpWallDist);
+            float baseFloor = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].floorH : 0.0f;
+            float baseCeil  = (mapY >= 0 && mapY < MAP_H && mapX >= 0 && mapX < MAP_W) ? worldMap[mapY][mapX].ceilH : 2.0f;
 
             char wallGlyph = ' ';
-            if (perpWallDist <= 1.25f)      wallGlyph = '@';
-            else if (perpWallDist <= 2.50f) wallGlyph = '#';
-            else if (perpWallDist <= 4.00f) wallGlyph = '%';
-            else if (perpWallDist <= 5.80f) wallGlyph = '*';
-            else if (perpWallDist <= 7.50f) wallGlyph = '+';
-            else if (perpWallDist <= 9.00f) wallGlyph = '-';
-            else if (perpWallDist <= 11.0f) wallGlyph = '.';
+            uint32_t wallColor;
 
-            if (corruptionLevel > 0.3f && wallGlyph != ' ' && (rand() % 100) < int(corruptionLevel * 10)) {
+            if (hit == 2) {
+                wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
+                wallGlyph = (perpWallDist <= 2.50f) ? '#' : '%';
+            } 
+            else if (hit == 3) {
+                baseFloor += 0.5f;  
+                wallColor = getElevationColor(baseFloor, perpWallDist + 2.0f, side); 
+                wallGlyph = '#'; 
+            }
+            else {
+                wallColor = getElevationColor(baseFloor, perpWallDist, side);
+                if (perpWallDist <= 1.25f)      wallGlyph = '@';
+                else if (perpWallDist <= 2.50f) wallGlyph = '#';
+                else if (perpWallDist <= 4.00f) wallGlyph = '%';
+                else if (perpWallDist <= 5.80f) wallGlyph = '*';
+                else if (perpWallDist <= 7.50f) wallGlyph = '+';
+                else if (perpWallDist <= 9.00f) wallGlyph = '-';
+                else if (perpWallDist <= 11.0f) wallGlyph = '.';
+            }
+
+            if (activeCorr > 0.3f && wallGlyph != ' ' && hit != 3 && (rand() % 100) < int(activeCorr * 10)) {
                 wallGlyph = "?!@#$%^&*"[rand() % 9];
             }
 
-            uint32_t wallColor;
-            if (hit == 2) wallColor = (side == 0) ? RED_GOAL_BRIGHT : RED_GOAL_DARK;
-            else          wallColor = getElevationColor(wallFloorH, perpWallDist, side);
+            int drawStart = horizon - int(((baseCeil - totalPlayerZ) * ROWS) / perpWallDist);
+            int drawEnd   = horizon - int(((baseFloor - totalPlayerZ) * ROWS) / perpWallDist);
 
             for (int r = 0; r < ROWS; ++r) {
                 if (r >= drawStart && r <= drawEnd && wallGlyph != ' ') {
-                    drawGlyphFine(col, r + vOffset, wallGlyph, wallColor);
+                    char finalGlyph = wallGlyph;
+                    if (hit == 3) {
+                        finalGlyph = ((r + col) % 2 == 0) ? '\\' : '/';
+                    }
+                    drawGlyphFine(col, r + vOffset, finalGlyph, wallColor);
                 }
             }
 
@@ -1102,8 +1629,10 @@ public:
             }
         }
 
-        if (corruptionLevel > 0.5f) {
-            renderStalkerSprite();
+        renderItems(zBuffer);
+
+        if (corruptionLevel > 0.5f || stalker.enragedTimer > 0.0f) {
+            renderStalkerSprite(zBuffer);
         }
 
         int cx = viewWidth / 2;
@@ -1115,7 +1644,7 @@ public:
             drawTextFine(36, 28, "! ATTACKED !", RED_GOAL_BRIGHT);
         }
 
-        drawRectFilled(1, 1, 52, 7, 0xFF050505);
+        drawRectFilled(1, 1, 52, 13, 0xFF050505); 
 
         std::string elevStr;
         uint32_t elevColor;
@@ -1130,9 +1659,10 @@ public:
             elevColor = TIER_LOW_BRIGHT;
         }
 
-        drawTextFine(2, 2, "ELEVATION: " + elevStr + " | STEPS: " + std::to_string(totalSteps), elevColor);
+        std::string themeName = getCurrentThemeName();
+        drawTextFine(2, 2, "AREA: " + themeName + " | LVL: " + std::to_string(currentLevel), elevColor);
         
-        if (corruptionLevel < 0.5f) {
+        if (corruptionLevel < 0.5f && player.toxicTimer <= 0.0f) {
             drawTextFine(2, 4, "TEST MAZE UTILITY v1.0", TIER_LOW_BRIGHT);
             drawTextFine(2, 6, "SYS: CLEAN", TIER_LOW_BRIGHT);
         } else {
@@ -1142,6 +1672,18 @@ public:
             uint32_t sanCol = (player.sanity < 30.0f) ? RED_GOAL_BRIGHT : ((player.sanity < 60.0f) ? 0xFFF59E0B : TIER_HIGH_BRIGHT);
             drawTextFine(2, 6, "SYS ERR: SANITY: " + std::to_string(int(player.sanity)) + "%", sanCol);
         }
+
+        drawTextFine(2, 8, "L-SHIFT: Sprint | L-CTRL: Crouch", TIER_MID_BRIGHT);
+
+        auto getItemName = [](ItemType type) -> std::string {
+            if (type == ITEM_BREAD) return "BREAD";
+            if (type == ITEM_MEDS)  return "MEDS ";
+            if (type == ITEM_PEBBLE) return "PEBBL";
+            return "---- ";
+        };
+        
+        drawTextFine(2, 10, "INV: [1] " + getItemName(player.inventory[0]) + " [2] " + getItemName(player.inventory[1]) + " [3] " + getItemName(player.inventory[2]), 0xFF94A3B8);
+        drawTextFine(2, 12, "[E] Pick Up | [1-3] Use/Throw | [SHIFT+1-3] Drop", TIER_MID_BRIGHT);
 
         if (currentDifficulty == DIFF_EASY) {
             renderSidebarMinimap();
@@ -1159,28 +1701,25 @@ public:
                 char mapCh = ' ';
                 uint32_t mapCol = 0xFF1E293B;
 
-                if (r == startPos.y && c == startPos.x) {
-                    mapCh = 'S';
-                    mapCol = TIER_HIGH_BRIGHT;
-                } else if (r == endPos.y && c == endPos.x) {
-                    mapCh = 'E';
-                    mapCol = RED_GOAL_BRIGHT;
-                } else if (worldMap[r][c].wallType == 1) {
-                    mapCh = '#';
-                    mapCol = 0xFF475569;
-                } else if (worldMap[r][c].isStairs) {
-                    mapCh = '=';
-                    mapCol = TIER_MID_BRIGHT;
-                } else if (worldMap[r][c].floorH > 0.7f) {
-                    mapCh = '^';
-                    mapCol = TIER_HIGH_BRIGHT;
-                } 
+                if (r == startPos.y && c == startPos.x) { mapCh = 'S'; mapCol = TIER_HIGH_BRIGHT; } 
+                else if (r == endPos.y && c == endPos.x) { mapCh = 'E'; mapCol = RED_GOAL_BRIGHT; } 
+                else if (worldMap[r][c].wallType == 1) { mapCh = '#'; mapCol = 0xFF475569; } 
+                else if (worldMap[r][c].wallType == 3) { mapCh = 'X'; mapCol = 0xFFF59E0B; } 
+                else if (worldMap[r][c].isStairs) { mapCh = '='; mapCol = TIER_MID_BRIGHT; } 
+                else if (worldMap[r][c].floorH > 0.7f) { mapCh = '^'; mapCol = TIER_HIGH_BRIGHT; } 
 
                 drawGlyphFine(miniStartX + c, miniStartY + r, mapCh, mapCol);
             }
         }
 
-        // Render player directional vision beacon (pointing forward)
+        for (const auto& it : itemsInWorld) {
+            if (it.x >= 0 && it.x < MAP_W && it.y >= 0 && it.y < MAP_H) {
+                char ch = (it.type == ITEM_BREAD) ? 'B' : ((it.type == ITEM_MEDS) ? '+' : 'o');
+                uint32_t color = (it.type == ITEM_BREAD) ? 0xFFF59E0B : ((it.type == ITEM_MEDS) ? 0xFF06B6D4 : 0xFF94A3B8);
+                drawGlyphFine(miniStartX + int(it.x), miniStartY + int(it.y), ch, color);
+            }
+        }
+
         int pMapX = int(player.posX);
         int pMapY = int(player.posY);
         int lookAheadX = int(player.posX + player.dirX * 1.2f);
@@ -1190,21 +1729,21 @@ public:
         }
         drawGlyphFine(miniStartX + pMapX, miniStartY + pMapY, 'O', 0xFF38BDF8);
 
-        // Render monster dot on minimap if chasing (glitching/changing characters)
-        if (stalker.isChasing) {
+        if (stalker.isChasing || stalker.investigateTimer > 0.0f) {
             int mX = int(stalker.x);
             int mY = int(stalker.y);
             if (mX >= 0 && mX < MAP_W && mY >= 0 && mY < MAP_H) {
-                const char glitchChars[] = "!@#$%&*X?";
-                char gChar = glitchChars[rand() % 9];
-                drawGlyphFine(miniStartX + mX, miniStartY + mY, gChar, RED_GOAL_BRIGHT);
+                char gChar = "!@#$%&*X?"[rand() % 9];
+                uint32_t mCol = stalker.enragedTimer > 0.0f ? RED_GOAL_BRIGHT : (stalker.isChasing ? 0xFFBE123C : 0xFFF59E0B);
+                drawGlyphFine(miniStartX + mX, miniStartY + mY, gChar, mCol);
             }
         }
 
         drawTextFine(72, 32, "MODE: EASY (MINIMAP)", 0xFF94A3B8);
         drawTextFine(72, 34, "[=] Stairs (Mid)", TIER_MID_BRIGHT);
         drawTextFine(72, 36, "[^] Overpass (High)", TIER_HIGH_BRIGHT);
-        drawTextFine(72, 38, "[S] Start  [E] End", 0xFF64748B);
+        drawTextFine(72, 38, "[X] Crawlspace Grate", 0xFFF59E0B);
+        drawTextFine(72, 40, "[S] Start  [E] End", 0xFF64748B);
     }
 
     void renderTitleScreen() {
@@ -1215,18 +1754,13 @@ public:
         std::string diffStr = (currentDifficulty == DIFF_NORMAL) ? "NORMAL (NO MINIMAP)" : "EASY (WITH MINIMAP)";
         std::string resStr = RESOLUTION_PRESETS[currentResIndex].label;
 
-        std::string options[3] = {
-            "START GAME",
-            "DIFFICULTY: " + diffStr,
-            "RESOLUTION: " + resStr
-        };
+        std::string options[3] = { "START GAME", "DIFFICULTY: " + diffStr, "RESOLUTION: " + resStr };
 
         for (int i = 0; i < 3; ++i) {
             uint32_t col = (i == menuCursor) ? TIER_HIGH_BRIGHT : 0xFF64748B;
             std::string prefix = (i == menuCursor) ? "-> " : "   ";
             drawTextStandard(32, 24 + i * 4, prefix + options[i], col);
         }
-
         drawTextStandard(26, 44, "UP/DOWN: SELECT | LEFT/RIGHT: CHANGE | ENTER: START", 0xFF334155);
     }
 
@@ -1238,7 +1772,7 @@ public:
 
         drawTextFine(35, 32, "[R / ESC] RESUME GAME", TIER_HIGH_BRIGHT);
         drawTextFine(35, 36, "[Q] QUIT TO TITLE", RED_GOAL_BRIGHT);
-        drawTextFine(34, 40, "DEV: [F1] SKIP LVL | [1-9] SET LVL", 0xFF64748B);
+        drawTextFine(34, 40, "DEV: [F2-F10] SET LEVEL", 0xFF64748B);
     }
 
     void renderSuccessScreen() {
@@ -1327,6 +1861,8 @@ public:
 };
 
 int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
     WalkAsciiElevationEngine engine;
     if (engine.init()) engine.run();
     engine.cleanup();
