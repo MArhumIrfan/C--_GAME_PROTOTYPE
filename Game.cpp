@@ -136,6 +136,9 @@ void Game::handleEvents() {
                 }
             } else if (currentState == STATE_PLAYING) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) { currentState = STATE_PAUSED; setCaptureMouse(false); }
+                else if (event.key.keysym.sym == SDLK_F10) {
+                    nextLevel();
+                }
                 else if (event.key.keysym.sym == SDLK_f) {
                     if (player.lanternFuel > 0) {
                         player.lanternOn = !player.lanternOn;
@@ -415,6 +418,10 @@ void Game::render3DView() {
     if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist0, 0.8f);
     if (ghost.active) { /* Render ghost sprite logic here */ }
     
+    if (currentDifficulty == DIFF_EASY) {
+        renderSidebarMinimap();
+    }
+
     renderUI();
 }
 
