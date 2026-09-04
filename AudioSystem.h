@@ -1,8 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <SDL2/SDL.h>
-#include <string>      // <-- ADDED THIS
-#include "GameData.h"  // <-- ADDED THIS
+#include <string>
+#include "GameData.h"
 
 struct AudioSystem {
     float masterVolume = 0.5f;
@@ -32,7 +32,6 @@ struct AudioSystem {
 
     uint32_t rngSeed = 1337;
 
-    void update(float dt);
     void triggerItemSound(ItemType type);
     void triggerStalkerSound(const std::string& type);
 

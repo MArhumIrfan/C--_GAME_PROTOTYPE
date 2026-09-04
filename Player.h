@@ -15,7 +15,7 @@ public:
 
     float sanity = 100.0f, health = 100.0f;
     bool takingDamage = false;
-    ItemType inventory[3] = { ITEM_NONE, ITEM_NONE, ITEM_NONE };
+    ItemType inventory[3] = { ITEM_NONE, ITEM_NONE, ITEM_NONE }; // <-- CORRECTED THIS LINE
     float toxicTimer = 0.0f;
 
     bool lanternOn = false, lanternBroken = false;
@@ -24,6 +24,7 @@ public:
 
     float noiseLevel = 0.0f;
 
-    void update(float dt, const MapCell worldMap[27][27]);
+    void update(float dt, const MapCell worldMap[27][27]); // <-- CORRECTED THIS LINE
     void reset();
+    bool isMoving() const { return forward != 0 || strafe != 0; }
 };

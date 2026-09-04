@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Constants.h"
-#include "GameData.h"
+// REMOVED: #include "Constants.h" (It's now included via GameData.h)
+#include "GameData.h"      // <-- ADD THIS LINE
 #include "AudioSystem.h"
 #include "Player.h"
 #include "Enemy.h"
@@ -47,9 +47,10 @@ private:
     void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color);
 
     // Helpers
+    std::string getCurrentThemeName(); // Moved declaration here
     void updateWindowScale();
     void setCaptureMouse(bool capture);
-    uint32_t applyShadow(uint32_t hexColor, float brightness);
+    uint32_t applyShadow(uint32_t hexColor, float brightness, float vignette);
     float calculateVisibility(int col, int row, float dist, int viewWidth);
     uint32_t getWallColor(float dist, int side);
     bool isMapVisible(float mapX, float mapY);

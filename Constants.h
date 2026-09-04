@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstdint> // <-- ADDED THIS to define uint32_t
+#include <cstdint> // Defines uint32_t
 
 // Game Constants
 constexpr int CHAR_W = 8;

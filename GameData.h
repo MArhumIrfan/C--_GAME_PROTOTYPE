@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "Constants.h" // <-- ADD THIS LINE
 
 // Enums
 enum GameState { STATE_TITLE, STATE_PLAYING, STATE_PAUSED, STATE_JUMPSCARE, STATE_SUCCESS, STATE_GAMEOVER, STATE_MESSAGE };
@@ -10,11 +11,17 @@ enum AIState { AI_STATE_IDLE, AI_STATE_WATCHING, AI_STATE_HUNTING, AI_STATE_LUNG
 
 // Structs
 struct ResolutionPreset { int width; int height; std::string label; };
-struct Point { 
-    int x, y; 
+struct Point {
+    int x, y;
     bool operator==(const Point& other) const { return x == other.x && y == other.y; }
 };
-struct MapCell { int wallType = 0; }; // wall types: 0=empty, 1=wall, 2=end, 3=crawl, 4=message, 5=door_closed, 6=door_open
+struct MapCell { int wallType = 0; };
 struct ItemEntity { float x, y; ItemType type; };
 struct Projectile { float x, y, z, vx, vy, vz; ItemType type; bool active = false; };
 struct Ghost { bool active = false; float x, y, timer; };
+
+// Global Constants that need the structs
+const std::vector<ResolutionPreset> RESOLUTION_PRESETS = {
+    { 800,  480, "800x480 (1X)" }, { 1280, 720, "1280x720 (HD)" }, { 1366, 768, "1366x768 (WXGA)" },
+    { 1600, 960, "1600x960 (2X)" }, { 1920, 1080, "1920x1080 (FHD)" }
+};
