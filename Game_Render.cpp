@@ -361,8 +361,8 @@ void WalkAsciiElevationEngine::render3DView() {
 
         renderItems(zBuffer);
 
-        if (stalker.active) renderEnemySprite(zBuffer, stalker, spriteStalker0, spriteStalker1, 1.55f);
-        if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist1, 1.35f);
+        if (stalker.active) renderEnemySprite(zBuffer, stalker, spriteStalker0, spriteStalker1, 2.55f);
+        if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist1, 2.35f);
 
         if (mistEnemy.active && !player.inLocker) {
             float distToMonster = std::hypot(player.posX - mistEnemy.x, player.posY - mistEnemy.y);

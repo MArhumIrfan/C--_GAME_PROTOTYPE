@@ -21,18 +21,26 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         float t = audio->globalTime;
 
         if (audio->gameState == STATE_TITLE || audio->gameState == STATE_SUCCESS) {
-            // 8-BIT MAIN MENU THEME
-            int step = int(t * 8.0f) % 16;
-            float freqs[16] = {261.63f, 329.63f, 392.0f, 523.25f, 392.0f, 329.63f, 261.63f, 196.0f, 261.63f, 329.63f, 392.0f, 523.25f, 659.25f, 523.25f, 392.0f, 329.63f};
-            float f = freqs[step];
-            float sq = (std::fmod(t * f, 1.0f) > 0.5f) ? 0.15f : -0.15f;
+            // CUSTOM BEEPBOX THEME (150 BPM)
+            int step = int(t * 10.0f) % 16; 
             
-            int bassStep = int(t * 4.0f) % 8;
-            float bassFreq = (bassStep == 0 || bassStep == 3 || bassStep == 6) ? 65.41f : 0.0f;
+            // Your exact melody: Pattern 1 followed by Pattern 2
+            float freqs[16] = {
+                1046.50f, 1046.50f, 783.99f, 0.0f, 880.00f, 880.00f, 0.0f, 880.00f, // Pattern 1
+                880.00f, 783.99f, 659.25f, 523.25f, 523.25f, 523.25f, 880.00f, 880.00f  // Pattern 2
+            };
+            
+            float f = freqs[step];
+            float sq = (f > 0.0f) ? ((std::fmod(t * f, 1.0f) > 0.5f) ? 0.15f : -0.15f) : 0.0f;
+            
+            // Subtle C-root bassline to support your melody
+            int bassStep = int(t * 5.0f) % 8;
+            float bassFreq = (bassStep == 0 || bassStep == 3 || bassStep == 6) ? 65.41f : 0.0f; 
             if (bassFreq > 0.0f) sq += (std::fmod(t * bassFreq, 1.0f) > 0.5f) ? 0.2f : -0.2f;
             
             finalSample = sq;
         }
+
         else if (audio->gameState == STATE_GAMEOVER) {
             // Same melodic shape as the menu theme, but defeated: half tempo,
             // dropped an octave, and with random dropouts like a record that's
@@ -108,16 +116,30 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
                 // bleeds back through - the SAME "old music" the player
                 // heard early on, now corrupted - growing louder and more
                 // distracting the deeper the game goes.
+                // Level 20+: Your custom melody returns, but corrupted
                 if (lvl >= 20) {
                     float resurgeVol = std::min(1.0f, (lvl - 19) * 0.12f);
                     float jitterAmt = std::min(1.0f, (lvl - 19) * 0.08f);
                     float ct = t;
+                    
+                    // Time distortion (skipping)
                     if (std::abs(getAudioNoise(audio->rngSeed)) < jitterAmt) ct += getAudioNoise(audio->rngSeed) * 0.15f;
                     bool dropout = std::abs(getAudioNoise(audio->rngSeed)) < (jitterAmt * 0.15f);
-                    float oldChord = std::sin(ct * 130.81f * 6.283f) + std::sin(ct * 164.81f * 6.283f) + std::sin(ct * 196.0f * 6.283f);
-                    if (!dropout) bgm += oldChord * 0.05f * resurgeVol;
+                    
+                    // The same sequence
+                    int step = int(ct * 10.0f) % 16;
+                    float freqs[16] = {
+                        1046.50f, 1046.50f, 783.99f, 0.0f, 880.00f, 880.00f, 0.0f, 880.00f, 
+                        880.00f, 783.99f, 659.25f, 523.25f, 523.25f, 523.25f, 880.00f, 880.00f
+                    };
+                    
+                    // Detune the pitch based on the corruption jitter
+                    float f = freqs[step] * (1.0f + getAudioNoise(audio->rngSeed) * (jitterAmt * 0.3f));
+                    float sq = (f > 0.0f) ? ((std::fmod(ct * f, 1.0f) > 0.5f) ? 0.15f : -0.15f) : 0.0f;
+
+                    if (!dropout) bgm += sq * 0.3f * resurgeVol;
                 }
-            }
+             }
 
             // GAMEPLAY AUDIO (Overlays the BGM)
             float footstep = 0.0f;
