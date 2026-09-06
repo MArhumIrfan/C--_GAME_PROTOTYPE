@@ -3,8 +3,14 @@
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
-    WalkAsciiElevationEngine engine;
-    if (engine.init()) engine.run();
-    engine.cleanup();
+
+    Game game;
+
+    if (game.init()) {
+        game.run();
+    }
+
+    game.cleanup();
+
     return 0;
 }
