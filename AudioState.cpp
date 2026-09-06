@@ -1,5 +1,4 @@
 #include "AudioState.h"
-
 #include <cmath>
 #include <algorithm>
 
@@ -20,31 +19,22 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         float bgm = 0.0f;
         float t = audio->globalTime;
 
+        // ==========================================
+        // 1. ORIGINAL MAIN MENU THEME
+        // ==========================================
         if (audio->gameState == STATE_TITLE || audio->gameState == STATE_SUCCESS) {
-            // CUSTOM BEEPBOX THEME (150 BPM)
-            int step = int(t * 10.0f) % 16; 
-            
-            // Your exact melody: Pattern 1 followed by Pattern 2
-            float freqs[16] = {
-                1046.50f, 1046.50f, 783.99f, 0.0f, 880.00f, 880.00f, 0.0f, 880.00f, // Pattern 1
-                880.00f, 783.99f, 659.25f, 523.25f, 523.25f, 523.25f, 880.00f, 880.00f  // Pattern 2
-            };
-            
+            int step = int(t * 8.0f) % 16;
+            float freqs[16] = {261.63f, 329.63f, 392.0f, 523.25f, 392.0f, 329.63f, 261.63f, 196.0f, 261.63f, 329.63f, 392.0f, 523.25f, 659.25f, 523.25f, 392.0f, 329.63f};
             float f = freqs[step];
-            float sq = (f > 0.0f) ? ((std::fmod(t * f, 1.0f) > 0.5f) ? 0.15f : -0.15f) : 0.0f;
+            float sq = (std::fmod(t * f, 1.0f) > 0.5f) ? 0.15f : -0.15f;
             
-            // Subtle C-root bassline to support your melody
-            int bassStep = int(t * 5.0f) % 8;
-            float bassFreq = (bassStep == 0 || bassStep == 3 || bassStep == 6) ? 65.41f : 0.0f; 
+            int bassStep = int(t * 4.0f) % 8;
+            float bassFreq = (bassStep == 0 || bassStep == 3 || bassStep == 6) ? 65.41f : 0.0f;
             if (bassFreq > 0.0f) sq += (std::fmod(t * bassFreq, 1.0f) > 0.5f) ? 0.2f : -0.2f;
             
             finalSample = sq;
         }
-
         else if (audio->gameState == STATE_GAMEOVER) {
-            // Same melodic shape as the menu theme, but defeated: half tempo,
-            // dropped an octave, and with random dropouts like a record that's
-            // given up - plus a low drone underneath instead of the bright bass.
             int step = int(t * 3.0f) % 16;
             float freqs[16] = {261.63f, 329.63f, 392.0f, 523.25f, 392.0f, 329.63f, 261.63f, 196.0f, 261.63f, 329.63f, 392.0f, 523.25f, 659.25f, 523.25f, 392.0f, 329.63f};
             float f = freqs[step] * 0.5f;
@@ -64,34 +54,44 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
         else if (audio->gameState == STATE_PLAYING) {
             int lvl = audio->currentLevel;
             
-            // BACKGROUND MUSIC & AMBIENCE GENERATOR
-            if (lvl <= 10) {
-                // Peaceful ethereal chord
-                float chord = std::sin(t * 130.81f * 6.283f) + std::sin(t * 164.81f * 6.283f) + std::sin(t * 196.0f * 6.283f);
-                bgm = chord * 0.04f;
-            } 
-            else if (lvl <= 13) {
-                // Music corrupting and glitching out
-                float corr = (lvl - 10) / 3.0f;
-                if (std::abs(getAudioNoise(audio->rngSeed)) < corr) t += getAudioNoise(audio->rngSeed) * 0.1f;
-                float chord = std::sin(t * 130.81f * 6.283f) + std::sin(t * 164.81f * 6.283f) + std::sin(t * 196.0f * 6.283f);
-                bgm = chord * (0.04f - (corr * 0.02f)) + getAudioNoise(audio->rngSeed) * corr * 0.03f;
+            // ==========================================
+            // 2. IN-GAME MAZE MUSIC & AMBIENCE
+            // ==========================================
+            if (lvl <= 13) {
+                // Levels 1-13: Your Custom BeepBox Song (Glitches out 11-13)
+                float ct = t;
+                float vol = 0.08f;
+                
+                if (lvl > 10) {
+                    float corr = (lvl - 10) / 3.0f;
+                    if (std::abs(getAudioNoise(audio->rngSeed)) < corr) ct += getAudioNoise(audio->rngSeed) * 0.1f;
+                    vol = 0.08f - (corr * 0.04f);
+                    if (std::abs(getAudioNoise(audio->rngSeed)) < (corr * 0.2f)) vol = 0.0f;
+                }
+                
+                int step = int(ct * 10.0f) % 16; 
+                float freqs[16] = {
+                    1046.50f, 1046.50f, 783.99f, 0.0f, 880.00f, 880.00f, 0.0f, 880.00f, 
+                    880.00f, 783.99f, 659.25f, 523.25f, 523.25f, 523.25f, 880.00f, 880.00f
+                };
+                float f = freqs[step];
+                bgm = (f > 0.0f) ? ((std::fmod(ct * f, 1.0f) > 0.5f) ? vol : -vol) : 0.0f;
+                
+                int bassStep = int(ct * 5.0f) % 8;
+                float bassFreq = (bassStep == 0 || bassStep == 3 || bassStep == 6) ? 65.41f : 0.0f; 
+                if (bassFreq > 0.0f) bgm += (std::fmod(ct * bassFreq, 1.0f) > 0.5f) ? (vol * 1.5f) : -(vol * 1.5f);
             } 
             else if (lvl <= 15) {
-                // Absolute Silence (14-15)
-                bgm = 0.0f;
+                // Levels 14-15: Dead Silence
+                bgm = 0.0f; 
             } 
             else {
-                // Level 16+: Mist / Stalker Ambience
-                // The hum drifts sharper and the wind thickens as corruption
-                // climbs, so the base ambience itself slowly sours over time
-                // rather than staying static.
+                // Levels 16+: Mist / Stalker Ambience (Hum + Wind)
                 float detune = audio->corruption * 4.0f;
                 float hum = std::sin(t * (45.0f + detune) * 6.283f) * 0.06f;
                 float wind = getAudioNoise(audio->rngSeed) * (0.02f + audio->corruption * 0.015f);
                 bgm = hum + wind;
 
-                // Random distant hallucinations
                 audio->ambientEventCooldown -= sampleDt;
                 if (audio->ambientEventCooldown <= 0.0f) {
                     audio->ambientEventCooldown = 5.0f + (std::abs(getAudioNoise(audio->rngSeed)) * 10.0f);
@@ -103,45 +103,53 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
                     audio->ambientEventTimer -= sampleDt;
                     audio->ambientEventPhase += sampleDt;
                     float pt = audio->ambientEventPhase;
-                    if (audio->ambientEventType == 1) { // Distant door scrape
+                    if (audio->ambientEventType == 1) { 
                         float env = std::exp(-pt * 3.0f);
                         bgm += getAudioNoise(audio->rngSeed) * env * 0.05f;
-                    } else { // Distant heavy thud
+                    } else { 
                         float env = std::exp(-pt * 5.0f);
                         bgm += std::sin(pt * 50.0f * 6.283f) * env * 0.15f;
                     }
                 }
 
-                // Level 20+: the peaceful chord from the tutorial levels
-                // bleeds back through - the SAME "old music" the player
-                // heard early on, now corrupted - growing louder and more
-                // distracting the deeper the game goes.
-                // Level 20+: Your custom melody returns, but corrupted
+                // Level 20+: Your custom melody returns (Slowed down, loud, skipping heavily)
                 if (lvl >= 20) {
-                    float resurgeVol = std::min(1.0f, (lvl - 19) * 0.12f);
-                    float jitterAmt = std::min(1.0f, (lvl - 19) * 0.08f);
-                    float ct = t;
+                    float resurgeVol = std::min(1.0f, (lvl - 19) * 0.25f); // Gets loud quickly
+                    float jitterAmt = std::min(1.0f, (lvl - 19) * 0.2f);
                     
-                    // Time distortion (skipping)
-                    if (std::abs(getAudioNoise(audio->rngSeed)) < jitterAmt) ct += getAudioNoise(audio->rngSeed) * 0.15f;
-                    bool dropout = std::abs(getAudioNoise(audio->rngSeed)) < (jitterAmt * 0.15f);
+                    float ct = t * 0.5f; // SLOWED DOWN BY HALF TEMPO
                     
-                    // The same sequence
+                    // Heavy time distortion / skipping
+                    if (std::abs(getAudioNoise(audio->rngSeed)) < jitterAmt) {
+                        ct += getAudioNoise(audio->rngSeed) * 0.5f;
+                    }
+                    bool dropout = std::abs(getAudioNoise(audio->rngSeed)) < (jitterAmt * 0.25f);
+                    
                     int step = int(ct * 10.0f) % 16;
                     float freqs[16] = {
                         1046.50f, 1046.50f, 783.99f, 0.0f, 880.00f, 880.00f, 0.0f, 880.00f, 
                         880.00f, 783.99f, 659.25f, 523.25f, 523.25f, 523.25f, 880.00f, 880.00f
                     };
                     
-                    // Detune the pitch based on the corruption jitter
-                    float f = freqs[step] * (1.0f + getAudioNoise(audio->rngSeed) * (jitterAmt * 0.3f));
-                    float sq = (f > 0.0f) ? ((std::fmod(ct * f, 1.0f) > 0.5f) ? 0.15f : -0.15f) : 0.0f;
+                    // Pitch bending
+                    float f = freqs[step] * (1.0f + getAudioNoise(audio->rngSeed) * (jitterAmt * 0.1f));
+                    float sq = (f > 0.0f) ? ((std::fmod(ct * f, 1.0f) > 0.5f) ? 0.2f : -0.2f) : 0.0f;
+                    
+                    // Bassline returns corrupted too
+                    int bassStep = int(ct * 5.0f) % 8;
+                    float bassFreq = (bassStep == 0 || bassStep == 3 || bassStep == 6) ? 65.41f : 0.0f; 
+                    if (bassFreq > 0.0f) {
+                        bassFreq *= (1.0f + getAudioNoise(audio->rngSeed) * (jitterAmt * 0.1f));
+                        sq += (std::fmod(ct * bassFreq, 1.0f) > 0.5f) ? 0.3f : -0.3f;
+                    }
 
-                    if (!dropout) bgm += sq * 0.3f * resurgeVol;
+                    if (!dropout) bgm += sq * resurgeVol;
                 }
-             }
+            }
 
-            // GAMEPLAY AUDIO (Overlays the BGM)
+            // ==========================================
+            // 3. SOUND EFFECTS
+            // ==========================================
             float footstep = 0.0f;
             if (audio->isMoving && !audio->isCrouching) {
                 float stepFreq = audio->isSprinting ? 4.5f : 2.5f;
@@ -229,16 +237,16 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
                 
                 float distScale = std::pow(std::clamp(1.0f - (audio->closestEnemyDist / 20.0f), 0.0f, 1.0f), 1.5f);
 
-                if (audio->monsterVocalType == 1) { // Growl
+                if (audio->monsterVocalType == 1) { 
                     float env = std::sin((vt / 2.0f) * 3.14159f); 
                     if (env < 0.0f) env = 0.0f;
                     float wave = std::sin(vt * 2.0f * 3.14159f * 35.0f) * 0.5f + std::sin(vt * 2.0f * 3.14159f * 45.0f) * 0.5f;
                     float rumble = getAudioNoise(audio->rngSeed) * 0.3f;
                     vocalAudio = (wave + rumble) * env * 1.2f * distScale;
-                } else if (audio->monsterVocalType == 2) { // Hiss
+                } else if (audio->monsterVocalType == 2) { 
                     float env = std::exp(-vt * 4.0f);
                     vocalAudio = getAudioNoise(audio->rngSeed) * env * 0.6f * distScale;
-                } else if (audio->monsterVocalType == 3) { // FM Scream
+                } else if (audio->monsterVocalType == 3) { 
                     float env = std::exp(-vt * 1.5f);
                     float mod = std::sin(vt * 2.0f * 3.14159f * 15.0f) * 200.0f; 
                     float wave = std::sin(vt * 2.0f * 3.14159f * (800.0f + mod));
