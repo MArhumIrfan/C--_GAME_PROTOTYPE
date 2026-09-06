@@ -144,3 +144,7 @@ inline const std::vector<std::string> spriteMist1 = {
 // initialized here.
 inline std::vector<std::string> spriteStalker0;
 inline std::vector<std::string> spriteStalker1;
+
+// NEW: Statue Sprites
+inline std::vector<std::string> spriteStatue;
+inline std::vector<std::string> spriteStatueJumpscare;

@@ -27,7 +27,9 @@ std::string WalkAsciiElevationEngine::scramble(std::string text, float sanity) {
     }
 
 void WalkAsciiElevationEngine::renderJumpscareScreen() {
-        const auto& currentSprite = spriteStalker0;
+        // Swap art based on what killed you
+        const auto& currentSprite = (deathReason == "DONT BLINK") ? spriteStatueJumpscare : spriteStalker0;
+        
         int rowCount = currentSprite.size();
         int colCount = currentSprite[0].size();
 
@@ -39,6 +41,7 @@ void WalkAsciiElevationEngine::renderJumpscareScreen() {
                 int screenX = centerXOffset + x;
                 int screenY = centerYOffset + y;
 
+                // Violent screen shaking
                 if ((rand() % 100) < 5) screenX += (rand() % 5) - 2;
 
                 if (screenX >= 0 && screenX < TOTAL_COLS && screenY >= 0 && screenY < ROWS) {
@@ -50,16 +53,7 @@ void WalkAsciiElevationEngine::renderJumpscareScreen() {
                 }
             }
         }
-
-        std::vector<std::string> creepyPhrases = {
-            "I SAW YOU", "YOU CANT HIDE", "HE IS HERE", "NO ESCAPE", "LOOK AT ME", "DEATH AWAITS"
-        };
-        for (int i = 0; i < 5; ++i) {
-            int rx = rand() % (TOTAL_COLS - 15);
-            int ry = rand() % (ROWS - 2);
-            drawTextFine(rx, ry, creepyPhrases[rand() % creepyPhrases.size()], RED_GOAL_BRIGHT);
-        }
-    }
+}
 
 void WalkAsciiElevationEngine::renderSidebarMinimap() {
         for (int r = 0; r < ROWS; ++r) drawGlyphFine(100, r, '|', 0xFF334155);

@@ -54,7 +54,7 @@ private:
 
         Player player;
 
-        Enemy stalker, mistEnemy;
+        Enemy stalker, mistEnemy, statue;
 
     
 

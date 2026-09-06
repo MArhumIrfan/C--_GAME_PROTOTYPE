@@ -565,6 +565,7 @@ void WalkAsciiElevationEngine::update(double dt) {
             audioState.itemSoundTimer = 0.2f;
             SDL_UnlockAudioDevice(audioDevice);
         }
+        
 
         bool inCrawlspace = worldMap[int(player.posY)][int(player.posX)].wallType == 3;
         if (inCrawlspace) {
@@ -795,6 +796,49 @@ void WalkAsciiElevationEngine::update(double dt) {
         } else if (stalker.active && inCrawlspace) {
              stalker.isChasing = false;
              stalker.currentPath.clear();
+        }
+
+        if (statue.active && !inCrawlspace) {
+            float distToStatue = std::hypot(player.posX - statue.x, player.posY - statue.y);
+            closestDist = std::min(closestDist, distToStatue);
+
+            bool inSight = hasLineOfSight(player.posX, player.posY, statue.x, statue.y);
+            bool lookingAt = false;
+
+            if (inSight) {
+                // Calculate directional vector to statue
+                float dx = (statue.x - player.posX) / distToStatue;
+                float dy = (statue.y - player.posY) / distToStatue;
+                
+                // Dot product against player's looking direction
+                float dot = dx * player.dirX + dy * player.dirY;
+                
+                // A dot product of ~0.65 covers roughly a 90 degree forward cone
+                if (dot > 0.65f && !player.inLocker) {
+                    lookingAt = true;
+                }
+            }
+
+            if (lookingAt) {
+                statue.isChasing = false; // Frozen
+            } else {
+                statue.isChasing = true; // Moving
+                moveEnemyToward(statue, player.posX, player.posY, dtSec);
+
+                if (distToStatue < 0.75f && !player.inLocker) {
+                    deathReason = "DONT BLINK";
+                    currentState = STATE_JUMPSCARE;
+                    jumpscareTimer = 2.5f; 
+                    setCaptureMouse(false);
+                    
+                    SDL_LockAudioDevice(audioDevice);
+                    audioState.gameState = currentState;
+                    audioState.inGame = false; 
+                    audioState.isJumpscare = true;
+                    SDL_UnlockAudioDevice(audioDevice);
+                    return;
+                }
+            }
         }
 
         player.sanity = std::max(0.0f, player.sanity);
