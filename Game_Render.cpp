@@ -30,7 +30,7 @@ float WalkAsciiElevationEngine::calculateVisibility(int col, int row, float dist
         float sanityFactor = std::max(0.35f, player.sanity / 100.0f);
 
         if (player.lanternOn) {
-            float maxSpot = 0.9f * sanityFactor;
+            float maxSpot = 1.5f * sanityFactor;
             float maxDist = 14.0f * sanityFactor;
             
             if (spotRadius > maxSpot || dist > maxDist) return 0.0f;
@@ -361,8 +361,8 @@ void WalkAsciiElevationEngine::render3DView() {
 
         renderItems(zBuffer);
 
-        if (stalker.active) renderEnemySprite(zBuffer, stalker, spriteStalker0, spriteStalker1, 0.55f);
-        if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist1, 0.45f);
+        if (stalker.active) renderEnemySprite(zBuffer, stalker, spriteStalker0, spriteStalker1, 1.55f);
+        if (mistEnemy.active) renderEnemySprite(zBuffer, mistEnemy, spriteMist0, spriteMist1, 1.35f);
 
         if (mistEnemy.active && !player.inLocker) {
             float distToMonster = std::hypot(player.posX - mistEnemy.x, player.posY - mistEnemy.y);
