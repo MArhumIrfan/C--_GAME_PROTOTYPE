@@ -565,6 +565,7 @@ void WalkAsciiElevationEngine::renderItems(const std::vector<float>& zBuffer) {
         }
     }
 
+
 void WalkAsciiElevationEngine::renderEnemySprite(const std::vector<float>& zBuffer, const Enemy& e, const std::vector<std::string>& f0, const std::vector<std::string>& f1, float heightMultiplier) {
         float spriteX = e.x - player.posX;
         float spriteY = e.y - player.posY;
