@@ -6,6 +6,27 @@
 #include <algorithm>
 #include <cstdlib>
 
+// ==========================================
+// Audio / RNG helpers
+// ==========================================
+
+void WalkAsciiElevationEngine::lockAudio() {
+    if (audioDevice != 0) SDL_LockAudioDevice(audioDevice);
+}
+
+void WalkAsciiElevationEngine::unlockAudio() {
+    if (audioDevice != 0) SDL_UnlockAudioDevice(audioDevice);
+}
+
+uint32_t WalkAsciiElevationEngine::visualRand() {
+    visualRngSeed = visualRngSeed * 1664525u + 1013904223u;
+    return visualRngSeed >> 16;
+}
+
+// ==========================================
+// Sprites
+// ==========================================
+
 void WalkAsciiElevationEngine::initializeSprites() {
     const std::vector<std::string> rawStalker0 = {
         "                                                                   ",
@@ -109,6 +130,11 @@ void WalkAsciiElevationEngine::initializeSprites() {
     padSprite(spriteStatue, rawStatue);
     padSprite(spriteStatueJumpscare, rawStatueJumpscare);
 }
+
+// ==========================================
+// Window / mouse
+// ==========================================
+
 void WalkAsciiElevationEngine::updateWindowScale() {
     if (window) {
         int targetW = RESOLUTION_PRESETS[currentResIndex].width;
@@ -122,6 +148,10 @@ void WalkAsciiElevationEngine::setCaptureMouse(bool capture) {
     SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
     SDL_SetWindowGrab(window, capture ? SDL_TRUE : SDL_FALSE);
 }
+
+// ==========================================
+// Maze generation
+// ==========================================
 
 void WalkAsciiElevationEngine::generateProceduralMultiLevelMaze() {
     srand(static_cast<unsigned int>(time(nullptr)) + currentLevel * 1337);
@@ -249,7 +279,7 @@ void WalkAsciiElevationEngine::generateProceduralMultiLevelMaze() {
     stalker.resetForNewLevel(MAP_W / 2 + 0.5f, MAP_H / 2 + 0.5f);
     mistEnemy.resetForNewLevel(MAP_W / 2 + 0.5f, MAP_H / 2 + 0.5f);
     statue.resetForNewLevel(MAP_W / 2 + 0.5f, MAP_H / 2 + 0.5f);
-    
+
     if (currentLevel <= 10) {
         corruptionLevel = 0.0f;
         stalker.active = false;
@@ -277,6 +307,10 @@ void WalkAsciiElevationEngine::generateProceduralMultiLevelMaze() {
     }
 }
 
+// ==========================================
+// Game flow
+// ==========================================
+
 void WalkAsciiElevationEngine::startNewGame() {
     currentLevel = 1;
     totalSteps = 0;
@@ -285,14 +319,14 @@ void WalkAsciiElevationEngine::startNewGame() {
     player.sanity = 100.0f;
     player.health = 100.0f;
     player.stamina = 100.0f;
-    
+
     for (int i = 0; i < 3; ++i) player.inventory[i] = ITEM_NONE;
 
     generateProceduralMultiLevelMaze();
     currentState = STATE_PLAYING;
     setCaptureMouse(true);
 
-    SDL_LockAudioDevice(audioDevice);
+    lockAudio();
     audioState.gameState = currentState;
     audioState.currentLevel = currentLevel;
     audioState.inGame = true;
@@ -300,7 +334,7 @@ void WalkAsciiElevationEngine::startNewGame() {
     audioState.sanity = 100.0f;
     audioState.closestEnemyDist = 20.0f;
     audioState.corruption = corruptionLevel;
-    SDL_UnlockAudioDevice(audioDevice);
+    unlockAudio();
 }
 
 void WalkAsciiElevationEngine::nextLevel() {
@@ -311,20 +345,24 @@ void WalkAsciiElevationEngine::nextLevel() {
     currentState = STATE_PLAYING;
     setCaptureMouse(true);
 
-    SDL_LockAudioDevice(audioDevice);
+    lockAudio();
     audioState.gameState = currentState; 
     audioState.currentLevel = currentLevel;
     audioState.inGame = true;
     audioState.isJumpscare = false;
     audioState.corruption = corruptionLevel;
-    SDL_UnlockAudioDevice(audioDevice);
+    unlockAudio();
 }
+
+// ==========================================
+// Init / cleanup
+// ==========================================
 
 bool WalkAsciiElevationEngine::init() {
     srand(static_cast<unsigned int>(time(nullptr)));
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) return false;
-    
+
     initializeSprites();
 
     window = SDL_CreateWindow(

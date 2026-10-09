@@ -52,26 +52,22 @@ private:
     std::string deathReason = "";
     float jumpscareTimer = 0.0f;
 
-        Player player;
+    Player player;
 
-        Enemy stalker, mistEnemy, statue;
+    Enemy stalker, mistEnemy, statue;
 
-    
+    // Centralized audio locking so we never call SDL_LockAudioDevice on a
+    // null device. Also used by the title screen to safely tweak masterVolume.
+    void lockAudio();
+    void unlockAudio();
 
-    
+    // Visual-only RNG. Gameplay code (AI, spawning) keeps using rand();
+    // render code (glitches, flicker, mist particles) uses this so AI
+    // behavior doesn't depend on how many frames were drawn.
+    uint32_t visualRngSeed = 0xDEADBEEF;
+    uint32_t visualRand();
 
-    
-    
-    
-
-    
-    
-    
-    
-
-    
-
-        void initializeSprites();
+    void initializeSprites();
 
     struct AStarNode {
         int x, y;
@@ -80,80 +76,80 @@ private:
         int f() const { return g + h; }
     };
 
-        std::vector<Point> findPath(Point start, Point end);
+    std::vector<Point> findPath(Point start, Point end);
 
-    
-        bool hasLineOfSight(float x1, float y1, float x2, float y2);
+    bool hasLineOfSight(float x1, float y1, float x2, float y2);
 
-        std::string getCurrentThemeName();
+    std::string getCurrentThemeName();
 
-        void updateWindowScale();
+    void updateWindowScale();
 
-        void setCaptureMouse(bool capture);
+    void setCaptureMouse(bool capture);
 
-        void moveEnemyToward(Enemy& e, float targetX, float targetY, float dtSec);
+    void moveEnemyToward(Enemy& e, float targetX, float targetY, float dtSec);
 
-        uint32_t applyShadow(uint32_t hexColor, float brightness);
+    uint32_t applyShadow(uint32_t hexColor, float brightness);
 
-        float calculateVisibility(int col, int row, float dist, int viewWidth, float pitch);
+    float calculateVisibility(int col, int row, float dist, int viewWidth, float pitch);
 
-    
-        float getVignette(int col, int row, int viewWidth, float sanity, float damageShake);
+    float getVignette(int col, int row, int viewWidth, float sanity, float damageShake);
 
-        bool isPixelVisible(int col, int row, float dist, int viewWidth, float pitch);
+    bool isPixelVisible(int col, int row, float dist, int viewWidth, float pitch);
 
-        uint32_t getWallColor(float dist, int side);
+    uint32_t getWallColor(float dist, int side);
 
-        bool isMapVisible(float mapX, float mapY);
+    bool isMapVisible(float mapX, float mapY);
 
-    
-        std::string scramble(std::string text, float sanity);
+    std::string scramble(std::string text, float sanity);
 
-        void generateProceduralMultiLevelMaze();
+    void generateProceduralMultiLevelMaze();
 
-        void startNewGame();
+    void startNewGame();
 
-        void nextLevel();
+    void nextLevel();
 
-        void drawGlyphStandard(int col, int row, char c, uint32_t fgColor);
+    void drawGlyphStandard(int col, int row, char c, uint32_t fgColor);
 
-        void drawTextStandard(int col, int row, const std::string& text, uint32_t color);
+    void drawTextStandard(int col, int row, const std::string& text, uint32_t color);
 
-        void drawGlyphFine(int col, int row, char c, uint32_t fgColor);
+    void drawGlyphFine(int col, int row, char c, uint32_t fgColor);
 
-        void drawTextFine(int col, int row, const std::string& text, uint32_t color);
+    void drawTextFine(int col, int row, const std::string& text, uint32_t color);
 
-        void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color);
+    void drawRectFilled(int startCol, int startRow, int numCols, int numRows, uint32_t color);
+
+    // Alpha-blended rect used by the pause overlay (SDL_RenderCopy does not
+    // blend, so transparency has to be baked into the pixel buffer here).
+    void drawRectFilledBlended(int startCol, int startRow, int numCols, int numRows, uint32_t color, float alpha);
 
 public:
-        bool init();
+    bool init();
 
-        void handleEvents();
+    void handleEvents();
 
-        void update(double dt);
+    void update(double dt);
 
-        void render3DView();
+    void render3DView();
 
-        void renderItems(const std::vector<float>& zBuffer);
+    void renderItems(const std::vector<float>& zBuffer);
 
-        void renderEnemySprite(const std::vector<float>& zBuffer, const Enemy& e, const std::vector<std::string>& f0, const std::vector<std::string>& f1, float heightMultiplier);
+    void renderEnemySprite(const std::vector<float>& zBuffer, const Enemy& e, const std::vector<std::string>& f0, const std::vector<std::string>& f1, float heightMultiplier);
 
-       void renderJumpscareScreen();
+    void renderJumpscareScreen();
 
-    
-        void renderSidebarMinimap();
+    void renderSidebarMinimap();
 
-        void renderTitleScreen();
+    void renderTitleScreen();
 
-        void renderPauseScreen();
+    void renderPauseScreen();
 
-        void renderSuccessScreen();
+    void renderSuccessScreen();
 
-        void renderGameOverScreen();
+    void renderGameOverScreen();
 
-        void render();
+    void render();
 
-        void run();
+    void run();
 
-        void cleanup();
+    void cleanup();
 };

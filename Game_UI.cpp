@@ -17,9 +17,9 @@ std::string WalkAsciiElevationEngine::getCurrentThemeName() {
 
 std::string WalkAsciiElevationEngine::scramble(std::string text, float sanity) {
     if (sanity > 50.0f) return text;
-    float glitchChance = (50.0f - sanity) * 0.5f; 
+    float glitchChance = (50.0f - sanity) * 0.5f;
     for(char& c : text) {
-        if (c != ' ' && (rand()%100) < glitchChance) c = "!@#$%^&*"[rand()%8];
+        if (c != ' ' && (visualRand() % 100) < glitchChance) c = "!@#$%^&*"[visualRand() % 8];
     }
     return text;
 }
@@ -27,7 +27,7 @@ std::string WalkAsciiElevationEngine::scramble(std::string text, float sanity) {
 void WalkAsciiElevationEngine::renderJumpscareScreen() {
     // Swap art based on what killed you
     const auto& currentSprite = (deathReason == "DONT BLINK") ? spriteStatueJumpscare : spriteStalker0;
-    
+
     int rowCount = currentSprite.size();
     int colCount = currentSprite[0].size();
 
@@ -40,12 +40,12 @@ void WalkAsciiElevationEngine::renderJumpscareScreen() {
             int screenY = centerYOffset + y;
 
             // Violent screen shaking
-            if ((rand() % 100) < 5) screenX += (rand() % 5) - 2;
+            if ((visualRand() % 100) < 5) screenX += (visualRand() % 5) - 2;
 
             if (screenX >= 0 && screenX < TOTAL_COLS && screenY >= 0 && screenY < ROWS) {
                 char glyph = currentSprite[y][x];
                 if (glyph != ' ' && glyph != '.') {
-                    uint32_t flashCol = ((rand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
+                    uint32_t flashCol = ((visualRand() % 2) == 0) ? RED_GOAL_BRIGHT : 0xFFFFFFFF;
                     drawGlyphFine(screenX, screenY, glyph, flashCol);
                 }
             }
@@ -62,9 +62,9 @@ void WalkAsciiElevationEngine::renderJumpscareScreen() {
 
     // Draw random flashing text around the screen
     for (int i = 0; i < 5; ++i) {
-        int rx = rand() % (TOTAL_COLS - 15);
-        int ry = rand() % (ROWS - 2);
-        drawTextFine(rx, ry, creepyPhrases[rand() % creepyPhrases.size()], RED_GOAL_BRIGHT);
+        int rx = visualRand() % (TOTAL_COLS - 15);
+        int ry = visualRand() % (ROWS - 2);
+        drawTextFine(rx, ry, creepyPhrases[visualRand() % creepyPhrases.size()], RED_GOAL_BRIGHT);
     }
 }
 
@@ -115,7 +115,7 @@ void WalkAsciiElevationEngine::renderSidebarMinimap() {
         uint32_t mCol = stalker.isChasing ? RED_GOAL_BRIGHT : 0xFFF59E0B;
         drawGlyphFine(miniStartX + int(stalker.x), miniStartY + int(stalker.y), gChar, mCol);
     }
-    
+
     if (mistEnemy.active && isMapVisible(mistEnemy.x, mistEnemy.y)) {
         char gChar = '~';
         uint32_t mCol = 0xFF8B5CF6;
@@ -149,7 +149,7 @@ void WalkAsciiElevationEngine::renderTitleScreen() {
         drawTextStandard(32, y, prefix + label, col);
         drawTextStandard(32 + label.length() + 4, y, bar, col);
     };
-    
+
     std::string options[6] = { "START GAME", "DIFFICULTY: " + diffStr, "VOLUME", "MOUSE SENSITIVITY", "RESOLUTION: " + resStr, "QUIT GAME" };
 
     for (int i = 0; i < 6; ++i) {
@@ -168,7 +168,9 @@ void WalkAsciiElevationEngine::renderTitleScreen() {
 }
 
 void WalkAsciiElevationEngine::renderPauseScreen() {
-    drawRectFilled(30, 18, 40, 24, 0xEE050505);
+    // Alpha-blended overlay baked into the pixel buffer (SDL_RenderCopy does
+    // not blend, so 0xEE050505 wouldn't have any visible transparency).
+    drawRectFilledBlended(30, 18, 40, 24, 0xFF050505, 0.85f);
     drawTextFine(38, 22, "========================", TIER_MID_BRIGHT);
     drawTextFine(38, 24, "      GAME PAUSED       ", TIER_MID_BRIGHT);
     drawTextFine(38, 26, "========================", TIER_MID_BRIGHT);
@@ -186,7 +188,7 @@ void WalkAsciiElevationEngine::renderSuccessScreen() {
     drawTextStandard(34, 22, "COMPLETED LEVEL:  " + std::to_string(currentLevel), 0xFFFFFFFF);
     drawTextStandard(34, 25, "TOTAL STEPS:      " + std::to_string(totalSteps), 0xFFFFFFFF);
     drawTextStandard(34, 28, "TIME TAKEN:       " + std::to_string(int(levelTime)) + " SECONDS", 0xFFFFFFFF);
-    
+
     if (corruptionLevel >= 0.5f) {
         drawTextStandard(34, 31, "REMAINING HEALTH: " + std::to_string(int(player.health)) + "%", TIER_HIGH_BRIGHT);
         drawTextStandard(34, 34, "REMAINING SANITY: " + std::to_string(int(player.sanity)) + "%", TIER_HIGH_BRIGHT);
